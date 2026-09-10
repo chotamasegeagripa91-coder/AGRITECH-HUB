@@ -45,16 +45,24 @@ fun MaterialsScreen(
     }
 
     val categories = remember(materials, language) {
-        val unique = materials.map { it.category }.distinct().filter { it.isNotBlank() }
-        listOf(allCategoryLabel) + unique
+        val canonicals = listOf("Electrical", "Plumbing", "Construction")
+        val otherCategories = materials.map { com.example.ui.utils.MaterialCategoryUtils.getCanonicalCategory(it.category, it.name) }
+            .distinct()
+            .filter { it !in canonicals && it.isNotBlank() }
+        listOf(allCategoryLabel, "Electrical", "Plumbing", "Construction") + otherCategories
     }
 
     val filteredMaterials = remember(materials, searchQuery, selectedCategory, language) {
         materials.filter { mat ->
+            val matchCat = if (selectedCategory == allCategoryLabel || selectedCategory == "All" || selectedCategory == "Zote") {
+                true
+            } else {
+                com.example.ui.utils.MaterialCategoryUtils.matchesCategory(mat, selectedCategory)
+            }
             val matchQuery = searchQuery.isBlank() ||
                     mat.name.contains(searchQuery, ignoreCase = true) ||
-                    mat.category.contains(searchQuery, ignoreCase = true)
-            val matchCat = selectedCategory == allCategoryLabel || mat.category == selectedCategory
+                    mat.category.contains(searchQuery, ignoreCase = true) ||
+                    com.example.ui.utils.MaterialCategoryUtils.getCanonicalCategory(mat.category, mat.name).contains(searchQuery, ignoreCase = true)
             matchQuery && matchCat
         }
     }
@@ -185,13 +193,24 @@ fun MaterialsScreen(
                                     )
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Row(verticalAlignment = Alignment.CenterVertically) {
+                                        val catName = com.example.ui.utils.MaterialCategoryUtils.getCanonicalCategory(item.category, item.name)
                                         Surface(
-                                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                            color = when (catName) {
+                                                "Electrical" -> AmberPrimary.copy(alpha = 0.15f)
+                                                "Plumbing" -> androidx.compose.ui.graphics.Color(0xFF0288D1).copy(alpha = 0.15f)
+                                                "Construction" -> androidx.compose.ui.graphics.Color(0xFFE65100).copy(alpha = 0.15f)
+                                                else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                            },
                                             shape = RoundedCornerShape(4.dp)
                                         ) {
                                             Text(
-                                                text = item.category,
-                                                color = MaterialTheme.colorScheme.primary,
+                                                text = catName,
+                                                color = when (catName) {
+                                                    "Electrical" -> AmberPrimary
+                                                    "Plumbing" -> androidx.compose.ui.graphics.Color(0xFF0288D1)
+                                                    "Construction" -> androidx.compose.ui.graphics.Color(0xFFE65100)
+                                                    else -> MaterialTheme.colorScheme.primary
+                                                },
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Medium,
                                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)

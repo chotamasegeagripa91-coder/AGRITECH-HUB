@@ -54,7 +54,14 @@ abstract class AppDatabase : RoomDatabase() {
             customerDao: CustomerDao,
             quoteDao: QuoteDao
         ) {
-            if (materialDao.getDemoCount() == 0) {
+            materialDao.normalizeLegacyCategories()
+            if (materialDao.getCountByCategory("Plumbing") == 0) {
+                materialDao.insertAll(defaultPlumbingMaterials)
+            }
+            if (materialDao.getCountByCategory("Construction") == 0) {
+                materialDao.insertAll(defaultConstructionMaterials)
+            }
+            if (materialDao.getDemoCount() == 0 || materialDao.getCount() == 0) {
                 populateMaterials(materialDao)
             }
             if (customerDao.getDemoCount() == 0) {
@@ -76,84 +83,118 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         private suspend fun populateMaterials(materialDao: MaterialDao) {
-            val defaultMaterials = listOf(
-                // Waya & Kebo (Cables)
-                MaterialEntity(name = "Cable 1.5mm Twin & Earth (Flat)", unit = "Roll", price = 180000.0, category = "Waya & Kebo (Cables)"),
-                MaterialEntity(name = "Cable 2.5mm Twin & Earth (Flat)", unit = "Roll", price = 280000.0, category = "Waya & Kebo (Cables)"),
-                MaterialEntity(name = "Cable 4.0mm Single Core (Red)", unit = "Roll", price = 125000.0, category = "Waya & Kebo (Cables)"),
-                MaterialEntity(name = "Cable 4.0mm Single Core (Black)", unit = "Roll", price = 125000.0, category = "Waya & Kebo (Cables)"),
-                MaterialEntity(name = "Cable 6.0mm Single Core (Red/Black)", unit = "Roll", price = 175000.0, category = "Waya & Kebo (Cables)"),
-                MaterialEntity(name = "Cable 10.0mm Single Core", unit = "Roll", price = 290000.0, category = "Waya & Kebo (Cables)"),
-                MaterialEntity(name = "Cable 16.0mm Armoured Cable 4-Core", unit = "Meter", price = 38000.0, category = "Waya & Kebo (Cables)"),
-                MaterialEntity(name = "Cable 25.0mm Armoured Cable 4-Core", unit = "Meter", price = 55000.0, category = "Waya & Kebo (Cables)"),
-                MaterialEntity(name = "Flexible Cable 1.5mm 3-Core", unit = "Roll", price = 145000.0, category = "Waya & Kebo (Cables)"),
-                MaterialEntity(name = "Flexible Cable 2.5mm 3-Core", unit = "Roll", price = 210000.0, category = "Waya & Kebo (Cables)"),
-                MaterialEntity(name = "Drop Wire 4.0mm (Tanesco Hook)", unit = "Meter", price = 3500.0, category = "Waya & Kebo (Cables)"),
-
-                // Distribution Boards (DB)
-                MaterialEntity(name = "Main Switch 63A Double Pole", unit = "Pcs", price = 35000.0, category = "Distribution Boards (DB)"),
-                MaterialEntity(name = "Main Switch 100A Triple Pole (3-Phase)", unit = "Pcs", price = 95000.0, category = "Distribution Boards (DB)"),
-                MaterialEntity(name = "Consumer Unit DB 4-Way Surface", unit = "Pcs", price = 32000.0, category = "Distribution Boards (DB)"),
-                MaterialEntity(name = "Consumer Unit DB 8-Way Surface", unit = "Pcs", price = 45000.0, category = "Distribution Boards (DB)"),
-                MaterialEntity(name = "Consumer Unit DB 12-Way Flush", unit = "Pcs", price = 65000.0, category = "Distribution Boards (DB)"),
-                MaterialEntity(name = "Consumer Unit DB 18-Way Flush", unit = "Pcs", price = 95000.0, category = "Distribution Boards (DB)"),
-                MaterialEntity(name = "3-Phase DB 12-Way Heavy Duty", unit = "Pcs", price = 220000.0, category = "Distribution Boards (DB)"),
-
-                // Circuit Breakers (MCB)
-                MaterialEntity(name = "Circuit Breaker MCB 10A (Lighting)", unit = "Pcs", price = 8500.0, category = "Circuit Breakers (MCB)"),
-                MaterialEntity(name = "Circuit Breaker MCB 20A / 32A (Sockets)", unit = "Pcs", price = 8500.0, category = "Circuit Breakers (MCB)"),
-                MaterialEntity(name = "Circuit Breaker MCB 45A / 63A Single Pole", unit = "Pcs", price = 12000.0, category = "Circuit Breakers (MCB)"),
-                MaterialEntity(name = "3-Phase MCB Breaker 63A TP", unit = "Pcs", price = 45000.0, category = "Circuit Breakers (MCB)"),
-                MaterialEntity(name = "Residual Current Device RCD 63A 30mA 2P", unit = "Pcs", price = 55000.0, category = "Circuit Breakers (MCB)"),
-                MaterialEntity(name = "Residual Current Device RCD 63A 30mA 4P", unit = "Pcs", price = 85000.0, category = "Circuit Breakers (MCB)"),
-                MaterialEntity(name = "Changeover Switch 63A Manual 2P", unit = "Pcs", price = 65000.0, category = "Circuit Breakers (MCB)"),
-                MaterialEntity(name = "Automatic Changeover Switch (ATS) 63A", unit = "Pcs", price = 185000.0, category = "Circuit Breakers (MCB)"),
-
-                // Swichi & Soketi (Switches)
-                MaterialEntity(name = "Socket 13A Single Switch Socket", unit = "Pcs", price = 6500.0, category = "Swichi & Soketi (Switches)"),
-                MaterialEntity(name = "Socket 13A Twin Double Switch Socket", unit = "Pcs", price = 12000.0, category = "Swichi & Soketi (Switches)"),
-                MaterialEntity(name = "Socket 15A Heavy Duty Single Socket", unit = "Pcs", price = 9500.0, category = "Swichi & Soketi (Switches)"),
-                MaterialEntity(name = "1 Gang 1 Way Light Switch", unit = "Pcs", price = 4500.0, category = "Swichi & Soketi (Switches)"),
-                MaterialEntity(name = "2 Gang 1 Way Light Switch", unit = "Pcs", price = 6500.0, category = "Swichi & Soketi (Switches)"),
-                MaterialEntity(name = "3 Gang 1 Way Light Switch", unit = "Pcs", price = 8500.0, category = "Swichi & Soketi (Switches)"),
-                MaterialEntity(name = "4 Gang 1 Way Light Switch", unit = "Pcs", price = 11000.0, category = "Swichi & Soketi (Switches)"),
-                MaterialEntity(name = "1 Gang 2 Way Light Switch (Staircase)", unit = "Pcs", price = 5500.0, category = "Swichi & Soketi (Switches)"),
-                MaterialEntity(name = "Cooker Control Unit 45A with Neon", unit = "Pcs", price = 28000.0, category = "Swichi & Soketi (Switches)"),
-                MaterialEntity(name = "Water Heater Switch 20A DP", unit = "Pcs", price = 14000.0, category = "Swichi & Soketi (Switches)"),
-                MaterialEntity(name = "AC Switch 30A with Indicator", unit = "Pcs", price = 18000.0, category = "Swichi & Soketi (Switches)"),
-
-                // Taa & LED (Lighting)
-                MaterialEntity(name = "LED Ceiling Panel 18W Round Warm/White", unit = "Pcs", price = 15000.0, category = "Taa & LED (Lighting)"),
-                MaterialEntity(name = "LED Ceiling Panel 24W Square White", unit = "Pcs", price = 22000.0, category = "Taa & LED (Lighting)"),
-                MaterialEntity(name = "LED Downlight 7W / 12W Spot", unit = "Pcs", price = 10000.0, category = "Taa & LED (Lighting)"),
-                MaterialEntity(name = "LED Tube Fitting 4ft Single 18W", unit = "Pcs", price = 14000.0, category = "Taa & LED (Lighting)"),
-                MaterialEntity(name = "LED Tube Fitting 4ft Double 36W", unit = "Pcs", price = 24000.0, category = "Taa & LED (Lighting)"),
-                MaterialEntity(name = "LED Floodlight 50W IP65 Outdoor", unit = "Pcs", price = 48000.0, category = "Taa & LED (Lighting)"),
-                MaterialEntity(name = "LED Floodlight 100W IP65 Outdoor", unit = "Pcs", price = 85000.0, category = "Taa & LED (Lighting)"),
-                MaterialEntity(name = "Bulkhead Fitting IP65 (Gate Light)", unit = "Pcs", price = 18000.0, category = "Taa & LED (Lighting)"),
-
-                // Mabomba & Conduit (Pipes)
-                MaterialEntity(name = "Conduit Pipe 20mm PVC Heavy Duty", unit = "Pcs", price = 4500.0, category = "Mabomba & Conduit (Pipes)"),
-                MaterialEntity(name = "Conduit Pipe 25mm PVC Heavy Duty", unit = "Pcs", price = 6500.0, category = "Mabomba & Conduit (Pipes)"),
-                MaterialEntity(name = "Flexible Conduit Pipe 20mm (50m Roll)", unit = "Roll", price = 35000.0, category = "Mabomba & Conduit (Pipes)"),
-                MaterialEntity(name = "Trunking PVC 20x10mm", unit = "Pcs", price = 3500.0, category = "Mabomba & Conduit (Pipes)"),
-                MaterialEntity(name = "Trunking PVC 40x25mm", unit = "Pcs", price = 7500.0, category = "Mabomba & Conduit (Pipes)"),
-
-                // Vifaa Vingine (Accessories)
-                MaterialEntity(name = "PVC Pattress Box Single 3x3", unit = "Pcs", price = 1200.0, category = "Vifaa Vingine (Accessories)"),
-                MaterialEntity(name = "PVC Pattress Box Twin 3x6", unit = "Pcs", price = 2000.0, category = "Vifaa Vingine (Accessories)"),
-                MaterialEntity(name = "Metal Flush Box Single 3x3", unit = "Pcs", price = 2500.0, category = "Vifaa Vingine (Accessories)"),
-                MaterialEntity(name = "PVC Bends / Couplers 20mm", unit = "Pkt", price = 12000.0, category = "Vifaa Vingine (Accessories)"),
-                MaterialEntity(name = "Insulation Tape 3M Premium", unit = "Roll", price = 2500.0, category = "Vifaa Vingine (Accessories)"),
-                MaterialEntity(name = "Earth Rod 5ft Copper Clad with Clamp", unit = "Set", price = 35000.0, category = "Vifaa Vingine (Accessories)"),
-
-                // Solar & Nishati (Solar)
-                MaterialEntity(name = "Solar Inverter 3.5kVA 24V Pure Sine", unit = "Pcs", price = 1250000.0, category = "Solar & Nishati (Solar)"),
-                MaterialEntity(name = "Solar Panel 400W Mono-Crystalline", unit = "Pcs", price = 320000.0, category = "Solar & Nishati (Solar)"),
-                MaterialEntity(name = "Lithium LiFePO4 Battery 24V 100Ah", unit = "Pcs", price = 1850000.0, category = "Solar & Nishati (Solar)")
-            )
-            materialDao.insertAll(defaultMaterials)
+            val allDefault = defaultElectricalMaterials + defaultPlumbingMaterials + defaultConstructionMaterials
+            materialDao.insertAll(allDefault)
         }
+
+        val defaultElectricalMaterials = listOf(
+            MaterialEntity(name = "Cable 1.5mm Twin & Earth (Flat)", unit = "Roll", price = 180000.0, category = "Electrical"),
+            MaterialEntity(name = "Cable 2.5mm Twin & Earth (Flat)", unit = "Roll", price = 280000.0, category = "Electrical"),
+            MaterialEntity(name = "Cable 4.0mm Single Core (Red)", unit = "Roll", price = 125000.0, category = "Electrical"),
+            MaterialEntity(name = "Cable 4.0mm Single Core (Black)", unit = "Roll", price = 125000.0, category = "Electrical"),
+            MaterialEntity(name = "Cable 6.0mm Single Core (Red/Black)", unit = "Roll", price = 175000.0, category = "Electrical"),
+            MaterialEntity(name = "Cable 10.0mm Single Core", unit = "Roll", price = 290000.0, category = "Electrical"),
+            MaterialEntity(name = "Cable 16.0mm Armoured Cable 4-Core", unit = "Meter", price = 38000.0, category = "Electrical"),
+            MaterialEntity(name = "Cable 25.0mm Armoured Cable 4-Core", unit = "Meter", price = 55000.0, category = "Electrical"),
+            MaterialEntity(name = "Flexible Cable 1.5mm 3-Core", unit = "Roll", price = 145000.0, category = "Electrical"),
+            MaterialEntity(name = "Flexible Cable 2.5mm 3-Core", unit = "Roll", price = 210000.0, category = "Electrical"),
+            MaterialEntity(name = "Drop Wire 4.0mm (Tanesco Hook)", unit = "Meter", price = 3500.0, category = "Electrical"),
+            MaterialEntity(name = "Main Switch 63A Double Pole", unit = "Pcs", price = 35000.0, category = "Electrical"),
+            MaterialEntity(name = "Main Switch 100A Triple Pole (3-Phase)", unit = "Pcs", price = 95000.0, category = "Electrical"),
+            MaterialEntity(name = "Consumer Unit DB 4-Way Surface", unit = "Pcs", price = 32000.0, category = "Electrical"),
+            MaterialEntity(name = "Consumer Unit DB 8-Way Surface", unit = "Pcs", price = 45000.0, category = "Electrical"),
+            MaterialEntity(name = "Consumer Unit DB 12-Way Flush", unit = "Pcs", price = 65000.0, category = "Electrical"),
+            MaterialEntity(name = "Consumer Unit DB 18-Way Flush", unit = "Pcs", price = 95000.0, category = "Electrical"),
+            MaterialEntity(name = "3-Phase DB 12-Way Heavy Duty", unit = "Pcs", price = 220000.0, category = "Electrical"),
+            MaterialEntity(name = "Circuit Breaker MCB 10A (Lighting)", unit = "Pcs", price = 8500.0, category = "Electrical"),
+            MaterialEntity(name = "Circuit Breaker MCB 20A / 32A (Sockets)", unit = "Pcs", price = 8500.0, category = "Electrical"),
+            MaterialEntity(name = "Circuit Breaker MCB 45A / 63A Single Pole", unit = "Pcs", price = 12000.0, category = "Electrical"),
+            MaterialEntity(name = "3-Phase MCB Breaker 63A TP", unit = "Pcs", price = 45000.0, category = "Electrical"),
+            MaterialEntity(name = "Residual Current Device RCD 63A 30mA 2P", unit = "Pcs", price = 55000.0, category = "Electrical"),
+            MaterialEntity(name = "Residual Current Device RCD 63A 30mA 4P", unit = "Pcs", price = 85000.0, category = "Electrical"),
+            MaterialEntity(name = "Changeover Switch 63A Manual 2P", unit = "Pcs", price = 65000.0, category = "Electrical"),
+            MaterialEntity(name = "Automatic Changeover Switch (ATS) 63A", unit = "Pcs", price = 185000.0, category = "Electrical"),
+            MaterialEntity(name = "Socket 13A Single Switch Socket", unit = "Pcs", price = 6500.0, category = "Electrical"),
+            MaterialEntity(name = "Socket 13A Twin Double Switch Socket", unit = "Pcs", price = 12000.0, category = "Electrical"),
+            MaterialEntity(name = "Socket 15A Heavy Duty Single Socket", unit = "Pcs", price = 9500.0, category = "Electrical"),
+            MaterialEntity(name = "1 Gang 1 Way Light Switch", unit = "Pcs", price = 4500.0, category = "Electrical"),
+            MaterialEntity(name = "2 Gang 1 Way Light Switch", unit = "Pcs", price = 6500.0, category = "Electrical"),
+            MaterialEntity(name = "3 Gang 1 Way Light Switch", unit = "Pcs", price = 8500.0, category = "Electrical"),
+            MaterialEntity(name = "4 Gang 1 Way Light Switch", unit = "Pcs", price = 11000.0, category = "Electrical"),
+            MaterialEntity(name = "1 Gang 2 Way Light Switch (Staircase)", unit = "Pcs", price = 5500.0, category = "Electrical"),
+            MaterialEntity(name = "Cooker Control Unit 45A with Neon", unit = "Pcs", price = 28000.0, category = "Electrical"),
+            MaterialEntity(name = "Water Heater Switch 20A DP", unit = "Pcs", price = 14000.0, category = "Electrical"),
+            MaterialEntity(name = "AC Switch 30A with Indicator", unit = "Pcs", price = 18000.0, category = "Electrical"),
+            MaterialEntity(name = "LED Ceiling Panel 18W Round Warm/White", unit = "Pcs", price = 15000.0, category = "Electrical"),
+            MaterialEntity(name = "LED Ceiling Panel 24W Square White", unit = "Pcs", price = 22000.0, category = "Electrical"),
+            MaterialEntity(name = "LED Downlight 7W / 12W Spot", unit = "Pcs", price = 10000.0, category = "Electrical"),
+            MaterialEntity(name = "LED Tube Fitting 4ft Single 18W", unit = "Pcs", price = 14000.0, category = "Electrical"),
+            MaterialEntity(name = "LED Tube Fitting 4ft Double 36W", unit = "Pcs", price = 24000.0, category = "Electrical"),
+            MaterialEntity(name = "LED Floodlight 50W IP65 Outdoor", unit = "Pcs", price = 48000.0, category = "Electrical"),
+            MaterialEntity(name = "LED Floodlight 100W IP65 Outdoor", unit = "Pcs", price = 85000.0, category = "Electrical"),
+            MaterialEntity(name = "Bulkhead Fitting IP65 (Gate Light)", unit = "Pcs", price = 18000.0, category = "Electrical"),
+            MaterialEntity(name = "Conduit Pipe 20mm PVC Heavy Duty", unit = "Pcs", price = 4500.0, category = "Electrical"),
+            MaterialEntity(name = "Conduit Pipe 25mm PVC Heavy Duty", unit = "Pcs", price = 6500.0, category = "Electrical"),
+            MaterialEntity(name = "Flexible Conduit Pipe 20mm (50m Roll)", unit = "Roll", price = 35000.0, category = "Electrical"),
+            MaterialEntity(name = "Trunking PVC 20x10mm", unit = "Pcs", price = 3500.0, category = "Electrical"),
+            MaterialEntity(name = "Trunking PVC 40x25mm", unit = "Pcs", price = 7500.0, category = "Electrical"),
+            MaterialEntity(name = "PVC Pattress Box Single 3x3", unit = "Pcs", price = 1200.0, category = "Electrical"),
+            MaterialEntity(name = "PVC Pattress Box Twin 3x6", unit = "Pcs", price = 2000.0, category = "Electrical"),
+            MaterialEntity(name = "Metal Flush Box Single 3x3", unit = "Pcs", price = 2500.0, category = "Electrical"),
+            MaterialEntity(name = "PVC Bends / Couplers 20mm", unit = "Pkt", price = 12000.0, category = "Electrical"),
+            MaterialEntity(name = "Insulation Tape 3M Premium", unit = "Roll", price = 2500.0, category = "Electrical"),
+            MaterialEntity(name = "Earth Rod 5ft Copper Clad with Clamp", unit = "Set", price = 35000.0, category = "Electrical"),
+            MaterialEntity(name = "Solar Inverter 3.5kVA 24V Pure Sine", unit = "Pcs", price = 1250000.0, category = "Electrical"),
+            MaterialEntity(name = "Solar Panel 400W Mono-Crystalline", unit = "Pcs", price = 320000.0, category = "Electrical"),
+            MaterialEntity(name = "Lithium LiFePO4 Battery 24V 100Ah", unit = "Pcs", price = 1850000.0, category = "Electrical")
+        )
+
+        val defaultPlumbingMaterials = listOf(
+            MaterialEntity(name = "PPR Pipe 20mm (PN20) 4m Hot/Cold", unit = "Pcs", price = 12000.0, category = "Plumbing"),
+            MaterialEntity(name = "PPR Pipe 25mm (PN20) 4m Hot/Cold", unit = "Pcs", price = 18000.0, category = "Plumbing"),
+            MaterialEntity(name = "PPR Pipe 32mm (PN20) 4m", unit = "Pcs", price = 28000.0, category = "Plumbing"),
+            MaterialEntity(name = "PVC Waste Pipe 1.5\" (3m Class B)", unit = "Pcs", price = 8500.0, category = "Plumbing"),
+            MaterialEntity(name = "PVC Waste Pipe 2\" (3m Class B)", unit = "Pcs", price = 12000.0, category = "Plumbing"),
+            MaterialEntity(name = "PVC Soil & Waste Pipe 4\" (Class B)", unit = "Pcs", price = 26000.0, category = "Plumbing"),
+            MaterialEntity(name = "Brass Gate Valve 3/4\" (Pegler Heavy)", unit = "Pcs", price = 22000.0, category = "Plumbing"),
+            MaterialEntity(name = "Brass Gate Valve 1\" (Pegler Heavy)", unit = "Pcs", price = 32000.0, category = "Plumbing"),
+            MaterialEntity(name = "Water Meter 1/2\" Brass Single Jet", unit = "Pcs", price = 45000.0, category = "Plumbing"),
+            MaterialEntity(name = "PPR Equal Elbow 20mm (90 Degree)", unit = "Pcs", price = 800.0, category = "Plumbing"),
+            MaterialEntity(name = "PPR Equal Tee 20mm", unit = "Pcs", price = 1200.0, category = "Plumbing"),
+            MaterialEntity(name = "PPR Female Socket 20mm x 1/2\"", unit = "Pcs", price = 2500.0, category = "Plumbing"),
+            MaterialEntity(name = "Water Tap Bibcock 1/2\" Brass", unit = "Pcs", price = 8500.0, category = "Plumbing"),
+            MaterialEntity(name = "Kitchen Sink Mixer Tap Chrome", unit = "Pcs", price = 48000.0, category = "Plumbing"),
+            MaterialEntity(name = "Flexible Hose Pipe 1/2\" x 1/2\" (45cm)", unit = "Pcs", price = 5500.0, category = "Plumbing"),
+            MaterialEntity(name = "Water Tank Simtank 1000L Cylindrical", unit = "Pcs", price = 260000.0, category = "Plumbing"),
+            MaterialEntity(name = "Water Tank Simtank 2000L Heavy Duty", unit = "Pcs", price = 480000.0, category = "Plumbing"),
+            MaterialEntity(name = "PVC Solvent Cement Glue Tangit 500ml", unit = "Tin", price = 18000.0, category = "Plumbing"),
+            MaterialEntity(name = "Teflon Thread Seal Tape 12mm x 10m", unit = "Roll", price = 1500.0, category = "Plumbing"),
+            MaterialEntity(name = "Shower Head with Arm Stainless Steel", unit = "Set", price = 25000.0, category = "Plumbing"),
+            MaterialEntity(name = "Toilet Cistern Float Valve Ballcock 1/2\"", unit = "Set", price = 14000.0, category = "Plumbing")
+        )
+
+        val defaultConstructionMaterials = listOf(
+            MaterialEntity(name = "Cement Simba / Twiga 42.5N (50kg Bag)", unit = "Bag", price = 19500.0, category = "Construction"),
+            MaterialEntity(name = "White Cement (50kg Bag)", unit = "Bag", price = 38000.0, category = "Construction"),
+            MaterialEntity(name = "Reinforcement Bar (Nondo) 10mm TMT (12m)", unit = "Pcs", price = 18500.0, category = "Construction"),
+            MaterialEntity(name = "Reinforcement Bar (Nondo) 12mm TMT (12m)", unit = "Pcs", price = 26500.0, category = "Construction"),
+            MaterialEntity(name = "Reinforcement Bar (Nondo) 16mm TMT (12m)", unit = "Pcs", price = 48000.0, category = "Construction"),
+            MaterialEntity(name = "Plaster Sand (Mchanga wa Plasta)", unit = "Trip", price = 180000.0, category = "Construction"),
+            MaterialEntity(name = "River Sand (Mchanga wa Mto kwa Zege)", unit = "Trip", price = 220000.0, category = "Construction"),
+            MaterialEntity(name = "Gravel / Aggregate (Kokoto 3/4\")", unit = "Trip", price = 260000.0, category = "Construction"),
+            MaterialEntity(name = "Concrete Blocks 5\" Solid (Matofali ya Zege)", unit = "Pcs", price = 1200.0, category = "Construction"),
+            MaterialEntity(name = "Concrete Blocks 6\" Hollow (Matofali ya Matundu)", unit = "Pcs", price = 1400.0, category = "Construction"),
+            MaterialEntity(name = "Timber Mbao 2x4 Treated Pine (12ft)", unit = "Pcs", price = 9500.0, category = "Construction"),
+            MaterialEntity(name = "Timber Mbao 2x6 Treated Pine (12ft)", unit = "Pcs", price = 14000.0, category = "Construction"),
+            MaterialEntity(name = "Plywood Sheet 8x4 (12mm Marine)", unit = "Pcs", price = 42000.0, category = "Construction"),
+            MaterialEntity(name = "Corrugated Iron Sheet (Bati Gauge 28 3m)", unit = "Pcs", price = 28000.0, category = "Construction"),
+            MaterialEntity(name = "Resincot Color Roofing Sheet 3m", unit = "Pcs", price = 36000.0, category = "Construction"),
+            MaterialEntity(name = "Binding Wire (Waya wa Kufungia Nondo 25kg)", unit = "Roll", price = 65000.0, category = "Construction"),
+            MaterialEntity(name = "Wire Nails 3\" / 4\" (Misumari ya Mbao 1kg)", unit = "Kg", price = 3500.0, category = "Construction"),
+            MaterialEntity(name = "Roofing Nails with Rubber Washer (1kg)", unit = "Kg", price = 4500.0, category = "Construction"),
+            MaterialEntity(name = "DPM Polythene Waterproof Membrane (30m)", unit = "Roll", price = 55000.0, category = "Construction"),
+            MaterialEntity(name = "BRC Mesh Reinforcement A142 (Roll)", unit = "Roll", price = 140000.0, category = "Construction")
+        )
 
         private suspend fun populateCustomers(customerDao: CustomerDao) {
             val defaultCustomers = listOf(

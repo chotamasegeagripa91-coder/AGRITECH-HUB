@@ -32,7 +32,12 @@ fun MaterialEditDialog(
 ) {
     val isEdit = material != null
     var name by remember { mutableStateOf(material?.name ?: "") }
-    var selectedCategory by remember { mutableStateOf(material?.category ?: "Waya & Kebo (Cables)") }
+    var selectedCategory by remember {
+        mutableStateOf(
+            if (material != null) com.example.ui.utils.MaterialCategoryUtils.getCanonicalCategory(material.category, material.name)
+            else com.example.ui.utils.MaterialCategoryUtils.ELECTRICAL
+        )
+    }
     var selectedUnit by remember { mutableStateOf(material?.unit ?: "Pcs") }
     var priceText by remember { mutableStateOf(if (material != null && material.price > 0) material.price.toLong().toString() else "") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -40,16 +45,7 @@ fun MaterialEditDialog(
     var categoryMenuExpanded by remember { mutableStateOf(false) }
     var unitMenuExpanded by remember { mutableStateOf(false) }
 
-    val categories = listOf(
-        "Waya & Kebo (Cables)",
-        "Swichi & Soketi (Switches)",
-        "Circuit Breakers (MCB)",
-        "Distribution Boards (DB)",
-        "Taa & LED (Lighting)",
-        "Mabomba & Conduit (Pipes)",
-        "Solar & Nishati (Solar)",
-        "Vifaa Vingine (Accessories)"
-    )
+    val categories = com.example.ui.utils.MaterialCategoryUtils.ITEM_CATEGORIES
 
     val units = listOf("Pcs", "Roll", "Mita", "Set", "Box", "Pkt", "Kg", "Bati")
 

@@ -37,6 +37,12 @@ interface MaterialDao {
 
     @Query("SELECT COUNT(*) FROM materials WHERE name LIKE '%[DEMO / SAMPLE]%' OR category LIKE '%demo%'")
     suspend fun getDemoCount(): Int
+
+    @Query("SELECT COUNT(*) FROM materials WHERE category = :category")
+    suspend fun getCountByCategory(category: String): Int
+
+    @Query("UPDATE materials SET category = 'Electrical' WHERE category != 'Plumbing' AND category != 'Construction'")
+    suspend fun normalizeLegacyCategories()
 }
 
 @Dao

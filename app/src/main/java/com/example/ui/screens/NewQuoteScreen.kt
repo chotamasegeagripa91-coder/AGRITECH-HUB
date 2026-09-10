@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -37,6 +38,7 @@ import com.example.ui.theme.EmeraldSuccess
 import com.example.ui.theme.RoseError
 import com.example.ui.utils.AppStrings
 import com.example.ui.utils.Formatters
+import com.example.ui.utils.MaterialCategoryUtils
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -607,13 +609,34 @@ fun MaterialPickerDialog(
     onItemsSelected: (List<MaterialEntity>) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf("All") }
     val selectedMaterials = remember { mutableStateListOf<MaterialEntity>() }
 
-    val filtered = remember(materials, searchQuery) {
-        if (searchQuery.isBlank()) materials
-        else materials.filter {
-            it.name.contains(searchQuery, ignoreCase = true) ||
-                    it.category.contains(searchQuery, ignoreCase = true)
+    val categories = listOf("All", "Electrical", "Plumbing", "Construction")
+
+    // Category counts for quick visual insight
+    val electricalCount = remember(materials) { materials.count { MaterialCategoryUtils.matchesCategory(it, "Electrical") } }
+    val plumbingCount = remember(materials) { materials.count { MaterialCategoryUtils.matchesCategory(it, "Plumbing") } }
+    val constructionCount = remember(materials) { materials.count { MaterialCategoryUtils.matchesCategory(it, "Construction") } }
+
+    val filtered = remember(materials, searchQuery, selectedCategory) {
+        materials.filter { mat ->
+            val matchesCategory = when (selectedCategory) {
+                "All" -> true
+                "Electrical" -> MaterialCategoryUtils.matchesCategory(mat, "Electrical")
+                "Plumbing" -> MaterialCategoryUtils.matchesCategory(mat, "Plumbing")
+                "Construction" -> MaterialCategoryUtils.matchesCategory(mat, "Construction")
+                else -> true
+            }
+            if (!matchesCategory) return@filter false
+
+            // The search bar searches strictly within the currently selected category
+            if (searchQuery.isBlank()) true
+            else {
+                mat.name.contains(searchQuery, ignoreCase = true) ||
+                        mat.category.contains(searchQuery, ignoreCase = true) ||
+                        MaterialCategoryUtils.getCanonicalCategory(mat.category, mat.name).contains(searchQuery, ignoreCase = true)
+            }
         }
     }
 
@@ -621,7 +644,7 @@ fun MaterialPickerDialog(
         Card(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
-                .fillMaxHeight(0.85f)
+                .fillMaxHeight(0.88f)
                 .padding(6.dp),
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -631,15 +654,23 @@ fun MaterialPickerDialog(
                     .fillMaxSize()
                     .padding(16.dp)
             ) {
+                // Header
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = if (language == "sw") "Chagua Vifaa kutoka Stoo" else "Select Items from Inventory",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                    )
+                    Column {
+                        Text(
+                            text = if (language == "sw") "Chagua Vifaa kutoka Stoo" else "Select Items from Inventory",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                        Text(
+                            text = if (language == "sw") "Chuja kwa aina ya vifaa na utafute" else "Filter by category and search",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     IconButton(onClick = onDismiss) {
                         Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
                     }
@@ -647,11 +678,27 @@ fun MaterialPickerDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
+                // Search bar with active filter scope
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    placeholder = { Text(if (language == "sw") "Tafuta vifaa..." else "Search items...") },
+                    placeholder = {
+                        Text(
+                            if (selectedCategory == "All") {
+                                if (language == "sw") "Tafuta vifaa vyote..." else "Search all inventory..."
+                            } else {
+                                if (language == "sw") "Tafuta vifaa vya $selectedCategory..." else "Search $selectedCategory items..."
+                            }
+                        )
+                    },
                     leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (searchQuery.isNotBlank()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(imageVector = Icons.Default.Close, contentDescription = "Clear search")
+                            }
+                        }
+                    },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
@@ -659,52 +706,209 @@ fun MaterialPickerDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                LazyColumn(
+                // Category Filter Chips: All, Electrical, Plumbing, Construction
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    items(filtered, key = { it.id }) { mat ->
-                        val isSelected = selectedMaterials.contains(mat)
-                        Surface(
-                            color = if (isSelected) AmberPrimary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant,
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    if (isSelected) selectedMaterials.remove(mat)
-                                    else selectedMaterials.add(mat)
-                                }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(text = mat.name, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
-                                    Text(
-                                        text = "${mat.category} • ${mat.unit}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
+                    categories.forEach { category ->
+                        val isSelected = selectedCategory == category
+                        val count = when (category) {
+                            "All" -> materials.size
+                            "Electrical" -> electricalCount
+                            "Plumbing" -> plumbingCount
+                            "Construction" -> constructionCount
+                            else -> 0
+                        }
+
+                        val icon = when (category) {
+                            "All" -> Icons.Default.Inventory2
+                            "Electrical" -> Icons.Default.Bolt
+                            "Plumbing" -> Icons.Default.WaterDrop
+                            "Construction" -> Icons.Default.Construction
+                            else -> Icons.Default.Category
+                        }
+
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = { selectedCategory = category },
+                            label = {
                                 Text(
-                                    text = Formatters.formatCurrency(mat.price),
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
+                                    text = "$category ($count)",
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                 )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Checkbox(
-                                    checked = isSelected,
-                                    onCheckedChange = {
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = when (category) {
+                                    "Electrical" -> AmberPrimary
+                                    "Plumbing" -> Color(0xFF0288D1)
+                                    "Construction" -> Color(0xFFE65100)
+                                    else -> AmberPrimary
+                                },
+                                selectedLabelColor = Color.Black,
+                                selectedLeadingIconColor = Color.Black
+                            ),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Count & selection indicator
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (language == "sw") "Vifaa vilivyopatikana: ${filtered.size}" else "Found: ${filtered.size} items",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (selectedMaterials.isNotEmpty()) {
+                        Text(
+                            text = if (language == "sw") "${selectedMaterials.size} vimechaguliwa" else "${selectedMaterials.size} selected",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = AmberPrimary
+                            )
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Inventory items list
+                if (filtered.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SearchOff,
+                                contentDescription = null,
+                                modifier = Modifier.size(48.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                            )
+                            Text(
+                                text = if (searchQuery.isNotBlank()) {
+                                    if (language == "sw") "Hakuna vifaa vilivyopatikana katika kundi la \"$selectedCategory\""
+                                    else "No items found in category \"$selectedCategory\" for \"$searchQuery\""
+                                } else {
+                                    if (language == "sw") "Hakuna vifaa katika kundi hili"
+                                    else "No items currently in \"$selectedCategory\""
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (selectedCategory != "All" || searchQuery.isNotBlank()) {
+                                OutlinedButton(
+                                    onClick = {
+                                        selectedCategory = "All"
+                                        searchQuery = ""
+                                    },
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text(if (language == "sw") "Onyesha Vifaa Vyote" else "Show All Items")
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(filtered, key = { it.id }) { mat ->
+                            val isSelected = selectedMaterials.contains(mat)
+                            val canonicalCategory = MaterialCategoryUtils.getCanonicalCategory(mat.category, mat.name)
+
+                            val categoryColor = when (canonicalCategory) {
+                                "Electrical" -> AmberPrimary
+                                "Plumbing" -> Color(0xFF0288D1)
+                                "Construction" -> Color(0xFFE65100)
+                                else -> MaterialTheme.colorScheme.primary
+                            }
+
+                            Surface(
+                                color = if (isSelected) AmberPrimary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
                                         if (isSelected) selectedMaterials.remove(mat)
                                         else selectedMaterials.add(mat)
                                     }
-                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = mat.name,
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Surface(
+                                                color = categoryColor.copy(alpha = 0.15f),
+                                                shape = RoundedCornerShape(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = canonicalCategory,
+                                                    color = categoryColor,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = "• ${mat.unit}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = Formatters.formatCurrency(mat.price),
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Checkbox(
+                                        checked = isSelected,
+                                        onCheckedChange = {
+                                            if (isSelected) selectedMaterials.remove(mat)
+                                            else selectedMaterials.add(mat)
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -712,9 +916,12 @@ fun MaterialPickerDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                // Add Selected Button
                 Button(
                     onClick = { onItemsSelected(selectedMaterials.toList()) },
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary, contentColor = Color.Black)
                 ) {
