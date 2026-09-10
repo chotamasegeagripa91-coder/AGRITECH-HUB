@@ -34,6 +34,9 @@ interface MaterialDao {
 
     @Query("SELECT COUNT(*) FROM materials")
     suspend fun getCount(): Int
+
+    @Query("SELECT COUNT(*) FROM materials WHERE name LIKE '%[DEMO / SAMPLE]%' OR category LIKE '%demo%'")
+    suspend fun getDemoCount(): Int
 }
 
 @Dao
@@ -64,6 +67,9 @@ interface CustomerDao {
 
     @Query("SELECT COUNT(*) FROM customers")
     suspend fun getCount(): Int
+
+    @Query("SELECT COUNT(*) FROM customers WHERE name LIKE '%[DEMO / SAMPLE]%' OR notes LIKE '%[DEMO / SAMPLE]%'")
+    suspend fun getDemoCount(): Int
 }
 
 @Dao
@@ -100,4 +106,7 @@ interface QuoteDao {
 
     @Query("SELECT COUNT(*) FROM quotes")
     suspend fun getCount(): Int
+
+    @Query("SELECT COUNT(*) FROM quotes WHERE number LIKE 'DEMO-%'")
+    suspend fun getDemoCount(): Int
 }

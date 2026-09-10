@@ -34,23 +34,18 @@ abstract class AppDatabase : RoomDatabase() {
                     "agritech_hub_database"
                 )
                     .fallbackToDestructiveMigration()
-                    .addCallback(DatabaseCallback(scope))
                     .build()
                 INSTANCE = instance
-                instance
-            }
-        }
 
-        private class DatabaseCallback(
-            private val scope: CoroutineScope
-        ) : RoomDatabase.Callback() {
-            override fun onCreate(db: SupportSQLiteDatabase) {
-                super.onCreate(db)
-                INSTANCE?.let { database ->
-                    scope.launch(Dispatchers.IO) {
-                        populateDefaultData(database.materialDao(), database.customerDao(), database.quoteDao())
-                    }
+                scope.launch(Dispatchers.IO) {
+                    seedDefaultDataIfEmpty(
+                        instance.materialDao(),
+                        instance.customerDao(),
+                        instance.quoteDao()
+                    )
                 }
+
+                instance
             }
         }
 
@@ -59,13 +54,13 @@ abstract class AppDatabase : RoomDatabase() {
             customerDao: CustomerDao,
             quoteDao: QuoteDao
         ) {
-            if (materialDao.getCount() == 0) {
+            if (materialDao.getDemoCount() == 0) {
                 populateMaterials(materialDao)
             }
-            if (customerDao.getCount() == 0) {
+            if (customerDao.getDemoCount() == 0) {
                 populateCustomers(customerDao)
             }
-            if (quoteDao.getCount() == 0) {
+            if (quoteDao.getDemoCount() == 0) {
                 populateQuotes(quoteDao)
             }
         }
@@ -162,10 +157,10 @@ abstract class AppDatabase : RoomDatabase() {
 
         private suspend fun populateCustomers(customerDao: CustomerDao) {
             val defaultCustomers = listOf(
-                CustomerEntity(name = "Mhandisi Juma Rashid", phone = "+255 712 345 678", location = "Mikocheni, Dar es Salaam", notes = "Mradi wa jengo la ghorofa 2"),
-                CustomerEntity(name = "Bi. Amina Said", phone = "+255 754 987 654", location = "Kijitonyama, Dar es Salaam", notes = "Ukarabati wa nyumba ya makazi"),
-                CustomerEntity(name = "Kampuni ya Mlimani Estates", phone = "+255 689 112 233", location = "Mbezi Beach, Dar es Salaam", notes = "Ufungaji wa mifumo ya solar na umeme"),
-                CustomerEntity(name = "Mwalimu Hassan Ally", phone = "+255 767 889 900", location = "Sinza Kumekucha, Dar es Salaam", notes = "Ufungaji wa umeme kwenye duka la biashara")
+                CustomerEntity(name = "[DEMO / SAMPLE] Mhandisi Juma Rashid", phone = "+255 712 345 678", location = "Mikocheni, Dar es Salaam", notes = "[DEMO / SAMPLE] Mradi wa jengo la ghorofa 2"),
+                CustomerEntity(name = "[DEMO / SAMPLE] Bi. Amina Said", phone = "+255 754 987 654", location = "Kijitonyama, Dar es Salaam", notes = "[DEMO / SAMPLE] Ukarabati wa nyumba ya makazi"),
+                CustomerEntity(name = "[DEMO / SAMPLE] Kampuni ya Mlimani Estates", phone = "+255 689 112 233", location = "Mbezi Beach, Dar es Salaam", notes = "[DEMO / SAMPLE] Ufungaji wa mifumo ya solar na umeme"),
+                CustomerEntity(name = "[DEMO / SAMPLE] Mwalimu Hassan Ally", phone = "+255 767 889 900", location = "Sinza Kumekucha, Dar es Salaam", notes = "[DEMO / SAMPLE] Ufungaji wa umeme kwenye duka la biashara")
             )
             customerDao.insertAll(defaultCustomers)
         }
@@ -174,13 +169,13 @@ abstract class AppDatabase : RoomDatabase() {
             val sampleQuotes = listOf(
                 // 3 Sample Quotations
                 QuoteEntity(
-                    number = "QUO-2026-001",
+                    number = "DEMO-QUO-001",
                     date = "2026-09-01",
                     validUntil = "2026-09-15",
-                    customerName = "Mhandisi Juma Rashid",
+                    customerName = "[DEMO / SAMPLE] Mhandisi Juma Rashid",
                     customerPhone = "+255 712 345 678",
                     customerLocation = "Mikocheni, Dar es Salaam",
-                    description = "Ufungaji wa mifumo ya umeme nyumba ya ghorofa moja",
+                    description = "[DEMO / SAMPLE] Ufungaji wa mifumo ya umeme nyumba ya ghorofa moja",
                     itemsJson = """[{"id":"1","name":"Cable 1.5mm Twin & Earth (Flat)","unit":"Roll","price":180000.0,"quantity":2.0,"total":360000.0},{"id":"2","name":"Cable 2.5mm Twin & Earth (Flat)","unit":"Roll","price":280000.0,"quantity":3.0,"total":840000.0},{"id":"3","name":"Consumer Unit DB 12-Way Flush","unit":"Pcs","price":65000.0,"quantity":1.0,"total":65000.0},{"id":"4","name":"Circuit Breaker MCB 10A (Lighting)","unit":"Pcs","price":8500.0,"quantity":6.0,"total":51000.0},{"id":"5","name":"Circuit Breaker MCB 20A / 32A (Sockets)","unit":"Pcs","price":8500.0,"quantity":6.0,"total":51000.0},{"id":"6","name":"Socket 13A Twin Double Switch Socket","unit":"Pcs","price":12000.0,"quantity":12.0,"total":144000.0},{"id":"7","name":"2 Gang 1 Way Switch","unit":"Pcs","price":6500.0,"quantity":8.0,"total":52000.0},{"id":"8","name":"LED Ceiling Panel 18W Round Warm/White","unit":"Pcs","price":15000.0,"quantity":16.0,"total":240000.0}]""",
                     materialsTotal = 1803000.0,
                     labour = 450000.0,
@@ -190,13 +185,13 @@ abstract class AppDatabase : RoomDatabase() {
                     createdAt = System.currentTimeMillis() - 864000000L
                 ),
                 QuoteEntity(
-                    number = "QUO-2026-002",
+                    number = "DEMO-QUO-002",
                     date = "2026-09-05",
                     validUntil = "2026-09-19",
-                    customerName = "Bi. Amina Said",
+                    customerName = "[DEMO / SAMPLE] Bi. Amina Said",
                     customerPhone = "+255 754 987 654",
                     customerLocation = "Kijitonyama, Dar es Salaam",
-                    description = "Ukarabati wa jikoni na sebule (Rewiring & New Sockets)",
+                    description = "[DEMO / SAMPLE] Ukarabati wa jikoni na sebule (Rewiring & New Sockets)",
                     itemsJson = """[{"id":"1","name":"Cable 2.5mm Twin & Earth (Flat)","unit":"Roll","price":280000.0,"quantity":1.0,"total":280000.0},{"id":"2","name":"Cooker Control Unit 45A with Neon","unit":"Pcs","price":28000.0,"quantity":1.0,"total":28000.0},{"id":"3","name":"Socket 13A Twin Double Switch Socket","unit":"Pcs","price":12000.0,"quantity":6.0,"total":72000.0},{"id":"4","name":"Water Heater Switch 20A DP","unit":"Pcs","price":14000.0,"quantity":1.0,"total":14000.0},{"id":"5","name":"LED Downlight 7W / 12W Spot","unit":"Pcs","price":10000.0,"quantity":8.0,"total":80000.0}]""",
                     materialsTotal = 474000.0,
                     labour = 150000.0,
@@ -206,13 +201,13 @@ abstract class AppDatabase : RoomDatabase() {
                     createdAt = System.currentTimeMillis() - 432000000L
                 ),
                 QuoteEntity(
-                    number = "QUO-2026-003",
+                    number = "DEMO-QUO-003",
                     date = "2026-09-08",
                     validUntil = "2026-09-22",
-                    customerName = "Kampuni ya Mlimani Estates",
+                    customerName = "[DEMO / SAMPLE] Kampuni ya Mlimani Estates",
                     customerPhone = "+255 689 112 233",
                     customerLocation = "Mbezi Beach, Dar es Salaam",
-                    description = "Mfumo wa Solar Backup 3.5kVA na Taa za Nje",
+                    description = "[DEMO / SAMPLE] Mfumo wa Solar Backup 3.5kVA na Taa za Nje",
                     itemsJson = """[{"id":"1","name":"Solar Inverter 3.5kVA 24V Pure Sine","unit":"Pcs","price":1250000.0,"quantity":1.0,"total":1250000.0},{"id":"2","name":"Solar Panel 400W Mono-Crystalline","unit":"Pcs","price":320000.0,"quantity":4.0,"total":1280000.0},{"id":"3","name":"Lithium LiFePO4 Battery 24V 100Ah","unit":"Pcs","price":1850000.0,"quantity":1.0,"total":1850000.0},{"id":"4","name":"LED Floodlight 100W IP65 Outdoor","unit":"Pcs","price":85000.0,"quantity":2.0,"total":170000.0}]""",
                     materialsTotal = 4550000.0,
                     labour = 650000.0,
@@ -224,13 +219,13 @@ abstract class AppDatabase : RoomDatabase() {
 
                 // 3 Sample Invoices (validUntil is empty, no validity on invoices)
                 QuoteEntity(
-                    number = "INV-2026-001",
+                    number = "DEMO-INV-001",
                     date = "2026-08-20",
                     validUntil = "",
-                    customerName = "Mhandisi Juma Rashid",
+                    customerName = "[DEMO / SAMPLE] Mhandisi Juma Rashid",
                     customerPhone = "+255 712 345 678",
                     customerLocation = "Mikocheni, Dar es Salaam",
-                    description = "Ankara ya malipo ya Awamu ya 1 - Mfumo wa Wiring Ghorofa ya Chini",
+                    description = "[DEMO / SAMPLE] Ankara ya malipo ya Awamu ya 1 - Mfumo wa Wiring Ghorofa ya Chini",
                     itemsJson = """[{"id":"1","name":"Cable 1.5mm Twin & Earth (Flat)","unit":"Roll","price":180000.0,"quantity":1.0,"total":180000.0},{"id":"2","name":"Cable 2.5mm Twin & Earth (Flat)","unit":"Roll","price":280000.0,"quantity":2.0,"total":560000.0},{"id":"3","name":"Consumer Unit DB 8-Way Surface","unit":"Pcs","price":45000.0,"quantity":1.0,"total":45000.0},{"id":"4","name":"Main Switch 63A Double Pole","unit":"Pcs","price":35000.0,"quantity":1.0,"total":35000.0}]""",
                     materialsTotal = 820000.0,
                     labour = 250000.0,
@@ -240,13 +235,13 @@ abstract class AppDatabase : RoomDatabase() {
                     createdAt = System.currentTimeMillis() - 1800000000L
                 ),
                 QuoteEntity(
-                    number = "INV-2026-002",
+                    number = "DEMO-INV-002",
                     date = "2026-08-28",
                     validUntil = "",
-                    customerName = "Mwalimu Hassan Ally",
+                    customerName = "[DEMO / SAMPLE] Mwalimu Hassan Ally",
                     customerPhone = "+255 767 889 900",
                     customerLocation = "Sinza Kumekucha, Dar es Salaam",
-                    description = "Ankara ya Malipo ya Ufungaji Taa na Swichi za Duka",
+                    description = "[DEMO / SAMPLE] Ankara ya Malipo ya Ufungaji Taa na Swichi za Duka",
                     itemsJson = """[{"id":"1","name":"LED Ceiling Panel 18W Round Warm/White","unit":"Pcs","price":15000.0,"quantity":10.0,"total":150000.0},{"id":"2","name":"2 Gang 1 Way Switch","unit":"Pcs","price":6500.0,"quantity":4.0,"total":26000.0},{"id":"3","name":"Socket 13A Single Switch Socket","unit":"Pcs","price":6500.0,"quantity":4.0,"total":26000.0},{"id":"4","name":"Conduit Pipe 20mm PVC Heavy Duty","unit":"Pcs","price":4500.0,"quantity":10.0,"total":45000.0}]""",
                     materialsTotal = 247000.0,
                     labour = 80000.0,
@@ -256,13 +251,13 @@ abstract class AppDatabase : RoomDatabase() {
                     createdAt = System.currentTimeMillis() - 1100000000L
                 ),
                 QuoteEntity(
-                    number = "INV-2026-003",
+                    number = "DEMO-INV-003",
                     date = "2026-09-02",
                     validUntil = "",
-                    customerName = "Kampuni ya Mlimani Estates",
+                    customerName = "[DEMO / SAMPLE] Kampuni ya Mlimani Estates",
                     customerPhone = "+255 689 112 233",
                     customerLocation = "Mbezi Beach, Dar es Salaam",
-                    description = "Ankara ya Ufungaji Taa za Nje (Floodlights) Mlimani Park",
+                    description = "[DEMO / SAMPLE] Ankara ya Ufungaji Taa za Nje (Floodlights) Mlimani Park",
                     itemsJson = """[{"id":"1","name":"LED Floodlight 50W IP65 Outdoor","unit":"Pcs","price":48000.0,"quantity":6.0,"total":288000.0},{"id":"2","name":"Cable 2.5mm Twin & Earth (Flat)","unit":"Roll","price":280000.0,"quantity":1.0,"total":280000.0},{"id":"3","name":"Earth Rod 5ft Copper Clad with Clamp","unit":"Set","price":35000.0,"quantity":1.0,"total":35000.0}]""",
                     materialsTotal = 603000.0,
                     labour = 150000.0,

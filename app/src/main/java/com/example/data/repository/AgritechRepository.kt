@@ -39,11 +39,20 @@ class AgritechRepository(
     suspend fun convertToInvoice(id: Int, newNumber: String) = quoteDao.convertToInvoice(id, newNumber)
     suspend fun setPaidStatus(id: Int, paid: Boolean) = quoteDao.setPaidStatus(id, paid)
 
-    // Clear all local database tables
+    // Clear all local database tables and ensure demo data remains available
     suspend fun clearAllLocalData() {
         materialDao.deleteAll()
         customerDao.deleteAll()
         quoteDao.deleteAll()
+        ensureDemoDataSeeded()
+    }
+
+    suspend fun ensureDemoDataSeeded() {
+        com.example.data.local.AppDatabase.seedDefaultDataIfEmpty(
+            materialDao,
+            customerDao,
+            quoteDao
+        )
     }
 
     // JSON Backup Export
@@ -356,6 +365,7 @@ class AgritechRepository(
             if (payload.quotes.isNotEmpty()) {
                 quoteDao.insertAll(payload.quotes)
             }
+            ensureDemoDataSeeded()
             true
         } catch (e: Exception) {
             e.printStackTrace()

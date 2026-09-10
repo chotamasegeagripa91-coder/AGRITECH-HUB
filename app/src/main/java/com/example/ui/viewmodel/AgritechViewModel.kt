@@ -96,11 +96,7 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
     init {
         refreshLicenseInfo()
         viewModelScope.launch(Dispatchers.IO) {
-            AppDatabase.seedDefaultDataIfEmpty(
-                database.materialDao(),
-                database.customerDao(),
-                database.quoteDao()
-            )
+            repository.ensureDemoDataSeeded()
         }
     }
 
@@ -457,14 +453,19 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch(Dispatchers.IO) {
             _isCloudSyncing.value = true
             try {
+                // Filter out DEMO/SAMPLE items so they are NEVER uploaded as real user data to Firestore
+                val realMaterials = materials.value.filter { !com.example.ui.utils.DemoUtils.isDemoMaterial(it) }
+                val realCustomers = customers.value.filter { !com.example.ui.utils.DemoUtils.isDemoCustomer(it) }
+                val realQuotes = quotes.value.filter { !com.example.ui.utils.DemoUtils.isDemoQuote(it) }
+
                 val payload = CloudBackupPayload(
                     version = 1,
                     timestamp = System.currentTimeMillis(),
                     userId = user.userId,
                     business = preferences.getBusinessSettings(),
-                    materials = materials.value,
-                    customers = customers.value,
-                    quotes = quotes.value,
+                    materials = realMaterials,
+                    customers = realCustomers,
+                    quotes = realQuotes,
                     licenseInfo = licenseInfo.value
                 )
 
@@ -701,9 +702,9 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
     fun exportBackupJson(): String {
         return runBlocking(Dispatchers.IO) {
             repository.exportAllDataAsJson(
-                materials = materials.value,
-                customers = customers.value,
-                quotes = quotes.value
+                materials = materials.value.filter { !com.example.ui.utils.DemoUtils.isDemoMaterial(it) },
+                customers = customers.value.filter { !com.example.ui.utils.DemoUtils.isDemoCustomer(it) },
+                quotes = quotes.value.filter { !com.example.ui.utils.DemoUtils.isDemoQuote(it) }
             )
         }
     }
