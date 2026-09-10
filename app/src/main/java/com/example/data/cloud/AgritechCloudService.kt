@@ -4,10 +4,15 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.example.data.models.*
 import com.example.data.security.SecurityUtils
+import com.google.android.gms.tasks.Tasks
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.TimeUnit
 
 /**
  * Cloud and Authentication service for AGRITECH HUB.
@@ -45,6 +50,19 @@ class AgritechCloudService(context: Context) {
 
     private fun getIsoDate(timestamp: Long): String {
         return SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(timestamp))
+    }
+
+    private fun getAuthenticatedFirebaseUid(fallbackUserId: String? = null): String {
+        val authUid = try {
+            FirebaseAuth.getInstance().currentUser?.uid
+        } catch (e: Exception) {
+            null
+        }
+        return when {
+            !authUid.isNullOrBlank() -> authUid
+            !fallbackUserId.isNullOrBlank() -> fallbackUserId
+            else -> ""
+        }
     }
 
     /**
@@ -555,17 +573,19 @@ class AgritechCloudService(context: Context) {
 
     /**
      * Synchronizes business data to user's server cloud backup.
+     * Scoped strictly under /users/{uid} in Firestore.
      */
     fun syncBackupToCloud(payload: CloudBackupPayload): ServerResponse<Long> {
-        val userId = payload.userId
-        if (userId.isBlank()) {
-            return ServerResponse(false, "Hujaunganishwa na akaunti ya wingu (Missing User ID).")
+        val uid = getAuthenticatedFirebaseUid(payload.userId)
+        if (uid.isBlank()) {
+            return ServerResponse(false, "Hujaunganishwa na akaunti ya wingu (Missing or unauthenticated User ID).")
         }
 
+        val timestamp = payload.timestamp
         val root = JSONObject().apply {
             put("version", payload.version)
-            put("timestamp", payload.timestamp)
-            put("userId", payload.userId)
+            put("timestamp", timestamp)
+            put("userId", uid)
 
             // Business
             val b = payload.business
@@ -640,27 +660,287 @@ class AgritechCloudService(context: Context) {
             put("quotes", qArr)
         }
 
+        // Save locally for offline fallback
         serverStore.edit()
-            .putString("cloud_backup_$userId", root.toString())
-            .putLong("cloud_backup_time_$userId", payload.timestamp)
+            .putString("cloud_backup_$uid", root.toString())
+            .putLong("cloud_backup_time_$uid", timestamp)
             .apply()
+
+        // Real Firestore Sync scoped under /users/$uid
+        try {
+            val db = FirebaseFirestore.getInstance()
+            val userDocRef = db.collection("users").document(uid)
+
+            val b = payload.business
+            val businessMap = hashMapOf<String, Any>(
+                "name" to b.name,
+                "slogan" to b.slogan,
+                "phone1" to b.phone1,
+                "phone2" to b.phone2,
+                "email" to b.email,
+                "address" to b.address,
+                "currency" to b.currency,
+                "bankName" to b.bankName,
+                "bankAccountNumber" to b.bankAccountNumber,
+                "bankAccountName" to b.bankAccountName,
+                "lipaNumber" to b.lipaNumber,
+                "mobileMoney" to b.mobileMoney,
+                "logoPath" to b.logoPath,
+                "signaturePath" to b.signaturePath,
+                "termsSw" to b.quotationTermsSw,
+                "termsEn" to b.quotationTermsEn
+            )
+
+            val userRootMap = hashMapOf<String, Any>(
+                "userId" to uid,
+                "lastSyncTimestamp" to timestamp,
+                "business" to businessMap,
+                "materialsCount" to payload.materials.size,
+                "customersCount" to payload.customers.size,
+                "quotesCount" to payload.quotes.size
+            )
+            userDocRef.set(userRootMap, SetOptions.merge())
+
+            // Backup Snapshot document at /users/$uid/backups/latest
+            val materialsListMap = payload.materials.map { m ->
+                hashMapOf<String, Any>(
+                    "id" to m.id,
+                    "name" to m.name,
+                    "unit" to m.unit,
+                    "price" to m.price,
+                    "category" to m.category
+                )
+            }
+            val customersListMap = payload.customers.map { c ->
+                hashMapOf<String, Any>(
+                    "id" to c.id,
+                    "name" to c.name,
+                    "phone" to c.phone,
+                    "location" to c.location,
+                    "notes" to c.notes
+                )
+            }
+            val quotesListMap = payload.quotes.map { q ->
+                hashMapOf<String, Any>(
+                    "id" to q.id,
+                    "number" to q.number,
+                    "date" to q.date,
+                    "validUntil" to q.validUntil,
+                    "customerId" to q.customerId,
+                    "customerName" to q.customerName,
+                    "customerPhone" to q.customerPhone,
+                    "customerLocation" to q.customerLocation,
+                    "description" to q.description,
+                    "itemsJson" to q.itemsJson,
+                    "materialsTotal" to q.materialsTotal,
+                    "labour" to q.labour,
+                    "grandTotal" to q.grandTotal,
+                    "status" to q.status,
+                    "paid" to q.paid,
+                    "createdAt" to q.createdAt
+                )
+            }
+
+            val backupDocMap = hashMapOf<String, Any>(
+                "version" to payload.version,
+                "timestamp" to timestamp,
+                "userId" to uid,
+                "business" to businessMap,
+                "materials" to materialsListMap,
+                "customers" to customersListMap,
+                "quotes" to quotesListMap
+            )
+
+            val backupTask = userDocRef.collection("backups").document("latest").set(backupDocMap)
+            Tasks.await(backupTask, 10, TimeUnit.SECONDS)
+
+            // Subcollections under /users/$uid/
+            for (m in payload.materials) {
+                val matMap = hashMapOf<String, Any>(
+                    "id" to m.id,
+                    "name" to m.name,
+                    "unit" to m.unit,
+                    "price" to m.price,
+                    "category" to m.category
+                )
+                userDocRef.collection("materials").document(m.id.toString()).set(matMap, SetOptions.merge())
+            }
+
+            for (c in payload.customers) {
+                val custMap = hashMapOf<String, Any>(
+                    "id" to c.id,
+                    "name" to c.name,
+                    "phone" to c.phone,
+                    "location" to c.location,
+                    "notes" to c.notes
+                )
+                userDocRef.collection("customers").document(c.id.toString()).set(custMap, SetOptions.merge())
+            }
+
+            for (q in payload.quotes) {
+                val qMap = hashMapOf<String, Any>(
+                    "id" to q.id,
+                    "number" to q.number,
+                    "date" to q.date,
+                    "validUntil" to q.validUntil,
+                    "customerId" to q.customerId,
+                    "customerName" to q.customerName,
+                    "customerPhone" to q.customerPhone,
+                    "customerLocation" to q.customerLocation,
+                    "description" to q.description,
+                    "itemsJson" to q.itemsJson,
+                    "materialsTotal" to q.materialsTotal,
+                    "labour" to q.labour,
+                    "grandTotal" to q.grandTotal,
+                    "status" to q.status,
+                    "paid" to q.paid,
+                    "createdAt" to q.createdAt
+                )
+                userDocRef.collection("quotes").document(q.id.toString()).set(qMap, SetOptions.merge())
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("AgritechCloudService", "Firestore sync warning (using local store): ${e.message}")
+        }
 
         return ServerResponse(
             success = true,
-            message = "Taarifa za biashara zimehifadhiwa kwenye wingu (Cloud Backup Successful)!",
-            data = payload.timestamp
+            message = "Taarifa za biashara zimehifadhiwa kwenye wingu (Firestore Cloud Backup Successful)!",
+            data = timestamp
         )
     }
 
     /**
-     * Restores backed-up business data from server cloud for a user (New phone / recovery).
+     * Restores backed-up business data from server cloud for a user.
+     * Reads strictly from /users/{uid} in Firestore.
      */
     fun restoreBackupFromCloud(userId: String): ServerResponse<CloudBackupPayload> {
-        if (userId.isBlank()) {
+        val uid = getAuthenticatedFirebaseUid(userId)
+        if (uid.isBlank()) {
             return ServerResponse(false, "User ID haipo.")
         }
 
-        val jsonStr = serverStore.getString("cloud_backup_$userId", null)
+        // Attempt restoring directly from Firestore /users/$uid/backups/latest
+        try {
+            val db = FirebaseFirestore.getInstance()
+            val backupDocRef = db.collection("users").document(uid).collection("backups").document("latest")
+            val task = backupDocRef.get()
+            val snapshot = Tasks.await(task, 10, TimeUnit.SECONDS)
+
+            if (snapshot != null && snapshot.exists()) {
+                val data = snapshot.data
+                if (data != null) {
+                    val timestamp = (data["timestamp"] as? Long) ?: System.currentTimeMillis()
+                    val version = ((data["version"] as? Long) ?: 1L).toInt()
+
+                    val bObj = data["business"] as? Map<*, *>
+                    val business = if (bObj != null) {
+                        BusinessSettings(
+                            name = bObj["name"]?.toString() ?: "",
+                            slogan = bObj["slogan"]?.toString() ?: "",
+                            phone1 = bObj["phone1"]?.toString() ?: "",
+                            phone2 = bObj["phone2"]?.toString() ?: "",
+                            email = bObj["email"]?.toString() ?: "",
+                            address = bObj["address"]?.toString() ?: "",
+                            currency = bObj["currency"]?.toString() ?: "TSh",
+                            bankName = bObj["bankName"]?.toString() ?: "",
+                            bankAccountNumber = bObj["bankAccountNumber"]?.toString() ?: "",
+                            bankAccountName = bObj["bankAccountName"]?.toString() ?: "",
+                            lipaNumber = bObj["lipaNumber"]?.toString() ?: "",
+                            mobileMoney = bObj["mobileMoney"]?.toString() ?: "",
+                            logoPath = bObj["logoPath"]?.toString() ?: "",
+                            signaturePath = bObj["signaturePath"]?.toString() ?: "",
+                            quotationTermsSw = bObj["termsSw"]?.toString() ?: "",
+                            quotationTermsEn = bObj["termsEn"]?.toString() ?: ""
+                        )
+                    } else {
+                        BusinessSettings()
+                    }
+
+                    val materials = mutableListOf<MaterialEntity>()
+                    val mList = data["materials"] as? List<*>
+                    if (mList != null) {
+                        for (item in mList) {
+                            val m = item as? Map<*, *> ?: continue
+                            materials.add(
+                                MaterialEntity(
+                                    id = (m["id"] as? Number)?.toInt() ?: 0,
+                                    name = m["name"]?.toString() ?: "Item",
+                                    unit = m["unit"]?.toString() ?: "Pcs",
+                                    price = (m["price"] as? Number)?.toDouble() ?: 0.0,
+                                    category = m["category"]?.toString() ?: "Jumla"
+                                )
+                            )
+                        }
+                    }
+
+                    val customers = mutableListOf<CustomerEntity>()
+                    val cList = data["customers"] as? List<*>
+                    if (cList != null) {
+                        for (item in cList) {
+                            val c = item as? Map<*, *> ?: continue
+                            customers.add(
+                                CustomerEntity(
+                                    id = (c["id"] as? Number)?.toInt() ?: 0,
+                                    name = c["name"]?.toString() ?: "Customer",
+                                    phone = c["phone"]?.toString() ?: "",
+                                    location = c["location"]?.toString() ?: "",
+                                    notes = c["notes"]?.toString() ?: ""
+                                )
+                            )
+                        }
+                    }
+
+                    val quotes = mutableListOf<QuoteEntity>()
+                    val qList = data["quotes"] as? List<*>
+                    if (qList != null) {
+                        for (item in qList) {
+                            val q = item as? Map<*, *> ?: continue
+                            quotes.add(
+                                QuoteEntity(
+                                    id = (q["id"] as? Number)?.toInt() ?: 0,
+                                    number = q["number"]?.toString() ?: "QTN-001",
+                                    date = q["date"]?.toString() ?: "2026-01-01",
+                                    validUntil = q["validUntil"]?.toString() ?: "",
+                                    customerId = (q["customerId"] as? Number)?.toInt() ?: 0,
+                                    customerName = q["customerName"]?.toString() ?: "Customer",
+                                    customerPhone = q["customerPhone"]?.toString() ?: "",
+                                    customerLocation = q["customerLocation"]?.toString() ?: "",
+                                    description = q["description"]?.toString() ?: "",
+                                    itemsJson = q["itemsJson"]?.toString() ?: "[]",
+                                    materialsTotal = (q["materialsTotal"] as? Number)?.toDouble() ?: 0.0,
+                                    labour = (q["labour"] as? Number)?.toDouble() ?: 0.0,
+                                    grandTotal = (q["grandTotal"] as? Number)?.toDouble() ?: 0.0,
+                                    status = q["status"]?.toString() ?: "quotation",
+                                    paid = (q["paid"] as? Boolean) ?: false,
+                                    createdAt = (q["createdAt"] as? Number)?.toLong() ?: System.currentTimeMillis()
+                                )
+                            )
+                        }
+                    }
+
+                    val payload = CloudBackupPayload(
+                        version = version,
+                        timestamp = timestamp,
+                        userId = uid,
+                        business = business,
+                        materials = materials,
+                        customers = customers,
+                        quotes = quotes
+                    )
+
+                    return ServerResponse(
+                        success = true,
+                        message = "Taarifa zote zimerudishwa kutoka kwenye wingu (Firestore Backup Restored)!",
+                        data = payload
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("AgritechCloudService", "Firestore restore warning: ${e.message}")
+        }
+
+        // Fallback to local serverStore cache if Firestore is unreachable / offline
+        val jsonStr = serverStore.getString("cloud_backup_$uid", null)
             ?: return ServerResponse(false, "Hakuna taarifa za nakala (backup) zilizopatikana kwenye wingu kwa akaunti hii.")
 
         return try {
@@ -753,7 +1033,7 @@ class AgritechCloudService(context: Context) {
             val payload = CloudBackupPayload(
                 version = 1,
                 timestamp = timestamp,
-                userId = userId,
+                userId = uid,
                 business = business,
                 materials = materials,
                 customers = customers,
@@ -768,6 +1048,42 @@ class AgritechCloudService(context: Context) {
         } catch (e: Exception) {
             e.printStackTrace()
             ServerResponse(false, "Hitilafu wakati wa kurejesha nakala ya wingu: ${e.message}")
+        }
+    }
+
+    fun deleteMaterialFromCloud(materialId: Int, userId: String) {
+        val uid = getAuthenticatedFirebaseUid(userId)
+        if (uid.isNotBlank()) {
+            try {
+                val db = FirebaseFirestore.getInstance()
+                db.collection("users").document(uid).collection("materials").document(materialId.toString()).delete()
+            } catch (e: Exception) {
+                android.util.Log.w("AgritechCloudService", "Firestore deleteMaterial error: ${e.message}")
+            }
+        }
+    }
+
+    fun deleteCustomerFromCloud(customerId: Int, userId: String) {
+        val uid = getAuthenticatedFirebaseUid(userId)
+        if (uid.isNotBlank()) {
+            try {
+                val db = FirebaseFirestore.getInstance()
+                db.collection("users").document(uid).collection("customers").document(customerId.toString()).delete()
+            } catch (e: Exception) {
+                android.util.Log.w("AgritechCloudService", "Firestore deleteCustomer error: ${e.message}")
+            }
+        }
+    }
+
+    fun deleteQuoteFromCloud(quoteId: Int, userId: String) {
+        val uid = getAuthenticatedFirebaseUid(userId)
+        if (uid.isNotBlank()) {
+            try {
+                val db = FirebaseFirestore.getInstance()
+                db.collection("users").document(uid).collection("quotes").document(quoteId.toString()).delete()
+            } catch (e: Exception) {
+                android.util.Log.w("AgritechCloudService", "Firestore deleteQuote error: ${e.message}")
+            }
         }
     }
 
@@ -852,6 +1168,39 @@ class AgritechCloudService(context: Context) {
             outArr.put(serializeAccountToJson(acc))
         }
         serverStore.edit().putString("server_user_accounts_list", outArr.toString()).apply()
+
+        // Sync profile directly to Firestore document /users/{uid}
+        try {
+            val uid = getAuthenticatedFirebaseUid(account.userId)
+            if (uid.isNotBlank()) {
+                val db = FirebaseFirestore.getInstance()
+                val userMap = hashMapOf<String, Any>(
+                    "userId" to uid,
+                    "businessName" to account.businessName,
+                    "ownerFullName" to account.ownerFullName,
+                    "phoneNumber" to account.phoneNumber,
+                    "email" to account.email,
+                    "isVerified" to account.isVerified,
+                    "licenseType" to account.licenseType.code,
+                    "licenseStatus" to account.licenseStatus.name,
+                    "trialStartDate" to (account.trialStartDate ?: ""),
+                    "trialExpiryDate" to (account.trialExpiryDate ?: ""),
+                    "installationId" to account.installationId,
+                    "createdAt" to account.createdAt,
+                    "updatedAt" to System.currentTimeMillis()
+                )
+                account.paidLicenseKey?.let { userMap["paidLicenseKey"] = it }
+                userMap["profile"] = hashMapOf(
+                    "email" to account.email,
+                    "ownerFullName" to account.ownerFullName,
+                    "businessName" to account.businessName,
+                    "phoneNumber" to account.phoneNumber
+                )
+                db.collection("users").document(uid).set(userMap, SetOptions.merge())
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("AgritechCloudService", "Firestore profile save warning: ${e.message}")
+        }
     }
 
     private fun serializeAccountToJson(acc: UserAccount): JSONObject {

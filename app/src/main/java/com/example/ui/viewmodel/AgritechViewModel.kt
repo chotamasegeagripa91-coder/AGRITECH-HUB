@@ -638,6 +638,8 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
     fun deleteMaterial(material: MaterialEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteMaterial(material)
+            val currentUid = userAccount.value?.userId ?: ""
+            cloudService.deleteMaterialFromCloud(material.id, currentUid)
         }
     }
 
@@ -657,6 +659,8 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
     fun deleteCustomer(customer: CustomerEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteCustomer(customer)
+            val currentUid = userAccount.value?.userId ?: ""
+            cloudService.deleteCustomerFromCloud(customer.id, currentUid)
         }
     }
 
@@ -688,6 +692,8 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
     fun deleteQuote(quote: QuoteEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteQuote(quote)
+            val currentUid = userAccount.value?.userId ?: ""
+            cloudService.deleteQuoteFromCloud(quote.id, currentUid)
         }
     }
 
