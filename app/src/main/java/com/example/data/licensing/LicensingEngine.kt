@@ -198,6 +198,7 @@ object LicensingEngine {
             val licenseType = when (typeStr) {
                 "MONTHLY" -> LicenseType.MONTHLY
                 "QUARTERLY" -> LicenseType.QUARTERLY
+                "SEMI_ANNUAL", "SIX_MONTHS", "6MONTHS", "HALF_YEAR", "SEMIANNUAL" -> LicenseType.SEMI_ANNUAL
                 "YEARLY" -> LicenseType.YEARLY
                 "LIFETIME" -> LicenseType.LIFETIME
                 else -> LicenseType.fromCode(typeStr)
@@ -261,6 +262,7 @@ object LicensingEngine {
             val licenseType = when (typeLetter) {
                 "M" -> LicenseType.MONTHLY
                 "Q" -> LicenseType.QUARTERLY
+                "S", "H", "6" -> LicenseType.SEMI_ANNUAL
                 "Y" -> LicenseType.YEARLY
                 "L" -> LicenseType.LIFETIME
                 else -> LicenseType.LIFETIME

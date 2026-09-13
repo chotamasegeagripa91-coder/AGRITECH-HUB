@@ -612,22 +612,31 @@ fun MaterialPickerDialog(
     var selectedCategory by remember { mutableStateOf("All") }
     val selectedMaterials = remember { mutableStateListOf<MaterialEntity>() }
 
-    val categories = listOf("All", "Electrical", "Plumbing", "Construction")
+    val categories = remember(materials) {
+        MaterialCategoryUtils.extractDistinctCategories(materials, "All")
+    }
 
-    // Category counts for quick visual insight
-    val electricalCount = remember(materials) { materials.count { MaterialCategoryUtils.matchesCategory(it, "Electrical") } }
-    val plumbingCount = remember(materials) { materials.count { MaterialCategoryUtils.matchesCategory(it, "Plumbing") } }
-    val constructionCount = remember(materials) { materials.count { MaterialCategoryUtils.matchesCategory(it, "Construction") } }
+    val categoryCounts = remember(materials) {
+        val map = mutableMapOf<String, Int>()
+        map["All"] = materials.size
+        map["Electrical"] = materials.count { MaterialCategoryUtils.matchesCategory(it, "Electrical") }
+        map["Plumbing"] = materials.count { MaterialCategoryUtils.matchesCategory(it, "Plumbing") }
+        map["Construction"] = materials.count { MaterialCategoryUtils.matchesCategory(it, "Construction") }
+        
+        val customCats = materials.map { MaterialCategoryUtils.getCanonicalCategory(it.category, it.name) }
+            .distinct()
+            .filter { it !in MaterialCategoryUtils.DEFAULT_CATEGORIES && it.isNotBlank() }
+        
+        for (c in customCats) {
+            map[c] = materials.count { MaterialCategoryUtils.matchesCategory(it, c) }
+        }
+        map
+    }
 
     val filtered = remember(materials, searchQuery, selectedCategory) {
         materials.filter { mat ->
-            val matchesCategory = when (selectedCategory) {
-                "All" -> true
-                "Electrical" -> MaterialCategoryUtils.matchesCategory(mat, "Electrical")
-                "Plumbing" -> MaterialCategoryUtils.matchesCategory(mat, "Plumbing")
-                "Construction" -> MaterialCategoryUtils.matchesCategory(mat, "Construction")
-                else -> true
-            }
+            val matchesCategory = if (selectedCategory == "All") true
+            else MaterialCategoryUtils.matchesCategory(mat, selectedCategory)
             if (!matchesCategory) return@filter false
 
             // The search bar searches strictly within the currently selected category
@@ -716,13 +725,7 @@ fun MaterialPickerDialog(
                 ) {
                     categories.forEach { category ->
                         val isSelected = selectedCategory == category
-                        val count = when (category) {
-                            "All" -> materials.size
-                            "Electrical" -> electricalCount
-                            "Plumbing" -> plumbingCount
-                            "Construction" -> constructionCount
-                            else -> 0
-                        }
+                        val count = categoryCounts[category] ?: 0
 
                         val icon = when (category) {
                             "All" -> Icons.Default.Inventory2

@@ -189,7 +189,10 @@ class MainActivity : ComponentActivity() {
                                             editingMaterial = mat
                                             isAddingMaterial = false
                                         },
-                                        onDeleteMaterial = { mat -> viewModel.deleteMaterial(mat) }
+                                        onDeleteMaterial = { mat -> viewModel.deleteMaterial(mat) },
+                                        onDeleteAllMaterials = { viewModel.deleteAllMaterials() },
+                                        onDeleteMaterialsByCategory = { cat -> viewModel.deleteMaterialsByCategory(cat) },
+                                        onImportExcel = { inputStream -> viewModel.importMaterialsFromExcel(inputStream) }
                                     )
                                 }
 
@@ -262,6 +265,8 @@ class MainActivity : ComponentActivity() {
                                         isSyncing = isCloudSyncing,
                                         onSyncCloud = { viewModel.syncDataToCloud() },
                                         onRestoreCloud = { viewModel.restoreDataFromCloud() },
+                                        onDeleteDemoData = { viewModel.deleteDemoData() },
+                                        onChangePassword = { oldPass, newPass -> viewModel.changePassword(oldPass, newPass) },
                                         onLogout = { viewModel.logoutUser() }
                                     )
                                 }
@@ -274,6 +279,7 @@ class MainActivity : ComponentActivity() {
                         MaterialEditDialog(
                             material = editingMaterial,
                             language = language,
+                            availableCategories = materials.map { it.category }.distinct(),
                             onDismiss = {
                                 isAddingMaterial = false
                                 editingMaterial = null

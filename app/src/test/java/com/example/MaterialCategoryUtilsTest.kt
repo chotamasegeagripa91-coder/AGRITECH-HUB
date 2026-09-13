@@ -11,15 +11,17 @@ class MaterialCategoryUtilsTest {
 
     @Test
     fun testCategoryMapping() {
-        val cable = MaterialEntity(name = "Cable 1.5mm Twin & Earth", unit = "Roll", price = 180000.0, category = "Waya & Kebo (Cables)")
-        val switch = MaterialEntity(name = "Socket 13A Single Switch Socket", unit = "Pcs", price = 6500.0, category = "Swichi & Soketi (Switches)")
+        val electrical = MaterialEntity(name = "Cable 1.5mm Twin & Earth", unit = "Roll", price = 180000.0, category = "Electrical")
+        val switch = MaterialEntity(name = "Socket 13A Single Switch Socket", unit = "Pcs", price = 6500.0, category = "Umeme")
         val pipe = MaterialEntity(name = "PPR Pipe 20mm (PN20)", unit = "Pcs", price = 12000.0, category = "Plumbing")
         val cement = MaterialEntity(name = "Cement Simba 42.5N (50kg Bag)", unit = "Bag", price = 19500.0, category = "Construction")
+        val custom = MaterialEntity(name = "Solar Panel 300W Monocrystalline", unit = "Pcs", price = 350000.0, category = "Solar & Renewable")
 
-        assertEquals("Electrical", MaterialCategoryUtils.getCanonicalCategory(cable.category, cable.name))
+        assertEquals("Electrical", MaterialCategoryUtils.getCanonicalCategory(electrical.category, electrical.name))
         assertEquals("Electrical", MaterialCategoryUtils.getCanonicalCategory(switch.category, switch.name))
         assertEquals("Plumbing", MaterialCategoryUtils.getCanonicalCategory(pipe.category, pipe.name))
         assertEquals("Construction", MaterialCategoryUtils.getCanonicalCategory(cement.category, cement.name))
+        assertEquals("Solar & Renewable", MaterialCategoryUtils.getCanonicalCategory(custom.category, custom.name))
     }
 
     @Test

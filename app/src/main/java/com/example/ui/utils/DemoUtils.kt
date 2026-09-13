@@ -26,9 +26,22 @@ object DemoUtils {
     }
 
     fun isDemoMaterial(material: MaterialEntity): Boolean {
+        // Explicit user materials (imported or manually added) are never demo
+        if (!material.isDemo && !material.internalCode.startsWith("DEMO-") &&
+            (material.userId.isNotBlank() || material.internalCode.startsWith("MAT-"))
+        ) {
+            return false
+        }
+        if (material.isDemo) return true
+        if (material.internalCode.startsWith("DEMO-")) return true
         val name = material.name.lowercase()
         val cat = material.category.lowercase()
-        return name.contains("[demo") || name.contains("[sample") || name.contains("demo / sample") ||
-                cat.contains("demo") || cat.contains("sample")
+        if (name.contains("[demo") || name.contains("[sample") || name.contains("demo / sample") ||
+            cat.contains("demo") || cat.contains("sample")
+        ) {
+            return true
+        }
+        return !material.internalCode.startsWith("MAT-") && material.userId.isBlank() &&
+                com.example.data.local.AppDatabase.isDefaultCatalogItem(material.name, material.category)
     }
 }

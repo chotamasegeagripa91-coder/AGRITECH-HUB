@@ -5,6 +5,9 @@ import com.example.data.local.CustomerDao
 import com.example.data.local.MaterialDao
 import com.example.data.local.QuoteDao
 import com.example.data.models.*
+import com.example.ui.utils.DemoUtils
+import com.example.ui.utils.MaterialCategoryUtils
+import com.example.ui.utils.MaterialKeyUtils
 import kotlinx.coroutines.flow.Flow
 import org.json.JSONArray
 import org.json.JSONObject
@@ -19,11 +22,248 @@ class AgritechRepository(
     val allCustomers: Flow<List<CustomerEntity>> = customerDao.getAllCustomers()
     val allQuotes: Flow<List<QuoteEntity>> = quoteDao.getAllQuotes()
 
-    // Materials
-    suspend fun insertMaterial(material: MaterialEntity) = materialDao.insertMaterial(material)
+    // Materials - safe upsert to prevent duplication
+    suspend fun insertMaterial(material: MaterialEntity): Long {
+        val upserted = upsertMaterial(material)
+        return upserted.id.toLong()
+    }
+
     suspend fun updateMaterial(material: MaterialEntity) = materialDao.updateMaterial(material)
     suspend fun deleteMaterial(material: MaterialEntity) = materialDao.deleteMaterial(material)
     suspend fun deleteMaterialById(id: Int) = materialDao.deleteById(id)
+    suspend fun deleteMaterialsByCategory(category: String) {
+        val all = materialDao.getAllMaterialsList()
+        val toDeleteIds = all.filter { MaterialCategoryUtils.matchesCategory(it, category) }.map { it.id }
+        if (toDeleteIds.isNotEmpty()) {
+            materialDao.deleteByIds(toDeleteIds)
+        }
+    }
+    suspend fun allMaterialsList(): List<MaterialEntity> = materialDao.getAllMaterialsList()
+
+    suspend fun upsertMaterial(material: MaterialEntity, currentUserId: String = ""): MaterialEntity {
+        val isDemo = material.isDemo || DemoUtils.isDemoMaterial(material)
+        val canonicalCategory = MaterialCategoryUtils.getCanonicalCategory(material.category, material.name)
+        val user = if (isDemo) "" else if (material.userId.isNotBlank()) material.userId else currentUserId
+
+        val all = materialDao.getAllMaterialsList()
+        val incomingKey = MaterialKeyUtils.getNaturalKey(material.name, canonicalCategory, material.unit)
+        val incomingCode = material.internalCode.trim()
+
+        val existing = (if (incomingCode.isNotBlank()) all.firstOrNull { it.internalCode == incomingCode } else null)
+            ?: all.firstOrNull { MaterialKeyUtils.getNaturalKey(it) == incomingKey }
+
+        return if (existing != null) {
+            val updated = existing.copy(
+                name = material.name,
+                unit = material.unit,
+                price = if (material.price > 0.0) material.price else existing.price,
+                category = canonicalCategory,
+                isDemo = existing.isDemo || isDemo,
+                internalCode = if (existing.internalCode.isNotBlank()) existing.internalCode else (if (incomingCode.isNotBlank()) incomingCode else MaterialEntity.generateInternalCode()),
+                userId = if (existing.userId.isNotBlank()) existing.userId else user
+            )
+            materialDao.updateMaterial(updated)
+            updated
+        } else {
+            val code = if (incomingCode.isNotBlank()) incomingCode else MaterialEntity.generateInternalCode()
+            val toInsert = material.copy(
+                id = 0,
+                internalCode = code,
+                category = canonicalCategory,
+                isDemo = isDemo,
+                userId = user
+            )
+            val newId = materialDao.insertMaterial(toInsert).toInt()
+            toInsert.copy(id = newId)
+        }
+    }
+
+    suspend fun upsertMaterials(materials: List<MaterialEntity>, currentUserId: String = ""): Int {
+        if (materials.isEmpty()) return 0
+
+        val existing = materialDao.getAllMaterialsList().toMutableList()
+        val existingByCode = mutableMapOf<String, MaterialEntity>()
+        val existingByKey = mutableMapOf<String, MaterialEntity>()
+
+        for (item in existing) {
+            if (item.internalCode.isNotBlank()) {
+                existingByCode[item.internalCode] = item
+            }
+            val key = MaterialKeyUtils.getNaturalKey(item)
+            existingByKey[key] = item
+        }
+
+        val toUpdate = mutableListOf<MaterialEntity>()
+        val toInsert = mutableListOf<MaterialEntity>()
+
+        for (incoming in materials) {
+            val isDemo = incoming.isDemo || DemoUtils.isDemoMaterial(incoming)
+            val canonicalCategory = MaterialCategoryUtils.getCanonicalCategory(incoming.category, incoming.name)
+            val user = if (isDemo) "" else if (incoming.userId.isNotBlank()) incoming.userId else currentUserId
+            val code = incoming.internalCode.trim()
+            val key = MaterialKeyUtils.getNaturalKey(incoming.name, canonicalCategory, incoming.unit)
+
+            val match = (if (code.isNotBlank()) existingByCode[code] else null) ?: existingByKey[key]
+
+            if (match != null) {
+                val updated = match.copy(
+                    name = incoming.name,
+                    unit = incoming.unit,
+                    price = if (incoming.price > 0.0) incoming.price else match.price,
+                    category = canonicalCategory,
+                    isDemo = match.isDemo || isDemo,
+                    internalCode = if (match.internalCode.isNotBlank()) match.internalCode else (if (code.isNotBlank()) code else MaterialEntity.generateInternalCode()),
+                    userId = if (match.userId.isNotBlank()) match.userId else user
+                )
+                toUpdate.add(updated)
+                if (updated.internalCode.isNotBlank()) {
+                    existingByCode[updated.internalCode] = updated
+                }
+                existingByKey[key] = updated
+            } else {
+                val newCode = if (code.isNotBlank()) code else MaterialEntity.generateInternalCode()
+                val newEntity = incoming.copy(
+                    id = 0,
+                    internalCode = newCode,
+                    category = canonicalCategory,
+                    isDemo = isDemo,
+                    userId = user
+                )
+                toInsert.add(newEntity)
+                existingByCode[newCode] = newEntity
+                existingByKey[key] = newEntity
+            }
+        }
+
+        if (toUpdate.isNotEmpty()) {
+            materialDao.updateAll(toUpdate)
+        }
+        if (toInsert.isNotEmpty()) {
+            materialDao.insertAll(toInsert)
+        }
+
+        return toUpdate.size + toInsert.size
+    }
+
+    suspend fun cleanupDuplicateMaterialsOnce(): Int {
+        if (preferences.isMaterialDuplicateCleanupCompleted()) {
+            return 0
+        }
+        val count = performDuplicateMaterialCleanup()
+        preferences.setMaterialDuplicateCleanupCompleted(true)
+        return count
+    }
+
+    suspend fun performDuplicateMaterialCleanup(): Int {
+        val allMaterials = materialDao.getAllMaterialsList()
+        if (allMaterials.isEmpty()) return 0
+
+        val groups = allMaterials.groupBy { MaterialKeyUtils.getNaturalKey(it) }
+        val idsToDelete = mutableListOf<Int>()
+        val remappedIds = mutableMapOf<Int, Int>()
+        val survivorsToUpdate = mutableListOf<MaterialEntity>()
+
+        for ((_, group) in groups) {
+            if (group.size <= 1) {
+                val single = group.first()
+                var updated = single
+                val canonicalCategory = MaterialCategoryUtils.getCanonicalCategory(single.category, single.name)
+                val isDemo = single.isDemo || DemoUtils.isDemoMaterial(single)
+                var needsUpdate = false
+
+                if (single.internalCode.isBlank()) {
+                    updated = updated.copy(internalCode = MaterialEntity.generateInternalCode())
+                    needsUpdate = true
+                }
+                if (single.category != canonicalCategory) {
+                    updated = updated.copy(category = canonicalCategory)
+                    needsUpdate = true
+                }
+                if (single.isDemo != isDemo) {
+                    updated = updated.copy(isDemo = isDemo)
+                    needsUpdate = true
+                }
+                if (needsUpdate) {
+                    survivorsToUpdate.add(updated)
+                }
+                continue
+            }
+
+            // Duplicate group found: pick best survivor
+            val survivor = group.firstOrNull { it.isDemo || it.internalCode.startsWith("DEMO-") }
+                ?: group.firstOrNull { it.internalCode.isNotBlank() }
+                ?: group.minByOrNull { it.id }
+                ?: group.first()
+
+            val canonicalCategory = MaterialCategoryUtils.getCanonicalCategory(survivor.category, survivor.name)
+            val isDemo = group.any { it.isDemo || DemoUtils.isDemoMaterial(it) }
+            val highestPrice = group.maxOfOrNull { it.price } ?: survivor.price
+            val validUserId = group.map { it.userId }.firstOrNull { it.isNotBlank() } ?: survivor.userId
+            val internalCode = if (survivor.internalCode.isNotBlank()) survivor.internalCode else MaterialEntity.generateInternalCode()
+
+            val updatedSurvivor = survivor.copy(
+                price = if (survivor.price <= 0.0 && highestPrice > 0.0) highestPrice else survivor.price,
+                category = canonicalCategory,
+                isDemo = isDemo,
+                internalCode = internalCode,
+                userId = if (isDemo) "" else validUserId
+            )
+            survivorsToUpdate.add(updatedSurvivor)
+
+            for (item in group) {
+                if (item.id != survivor.id) {
+                    idsToDelete.add(item.id)
+                    remappedIds[item.id] = survivor.id
+                }
+            }
+        }
+
+        if (survivorsToUpdate.isNotEmpty()) {
+            materialDao.updateAll(survivorsToUpdate)
+        }
+        if (idsToDelete.isNotEmpty()) {
+            materialDao.deleteByIds(idsToDelete)
+        }
+        if (remappedIds.isNotEmpty()) {
+            remapQuoteItems(remappedIds)
+        }
+
+        return idsToDelete.size
+    }
+
+    private suspend fun remapQuoteItems(remappedIds: Map<Int, Int>) {
+        try {
+            val quotes = quoteDao.getAllQuotesList()
+            val quotesToUpdate = mutableListOf<QuoteEntity>()
+
+            for (quote in quotes) {
+                val jsonStr = quote.itemsJson
+                if (jsonStr.isBlank() || jsonStr == "[]") continue
+                var modified = false
+                val arr = JSONArray(jsonStr)
+                val newArr = JSONArray()
+                for (i in 0 until arr.length()) {
+                    val itemObj = arr.optJSONObject(i) ?: continue
+                    val oldIdStr = itemObj.optString("id", "")
+                    val oldId = oldIdStr.toIntOrNull()
+                    if (oldId != null && remappedIds.containsKey(oldId)) {
+                        val newId = remappedIds[oldId]
+                        itemObj.put("id", newId.toString())
+                        modified = true
+                    }
+                    newArr.put(itemObj)
+                }
+                if (modified) {
+                    quotesToUpdate.add(quote.copy(itemsJson = newArr.toString()))
+                }
+            }
+            if (quotesToUpdate.isNotEmpty()) {
+                quoteDao.updateAll(quotesToUpdate)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
 
     // Customers
     suspend fun insertCustomer(customer: CustomerEntity) = customerDao.insertCustomer(customer)
@@ -39,20 +279,52 @@ class AgritechRepository(
     suspend fun convertToInvoice(id: Int, newNumber: String) = quoteDao.convertToInvoice(id, newNumber)
     suspend fun setPaidStatus(id: Int, paid: Boolean) = quoteDao.setPaidStatus(id, paid)
 
-    // Clear all local database tables and ensure demo data remains available
-    suspend fun clearAllLocalData() {
+    // Clear local data safely on logout/account switch without wiping or resurrecting demo data
+    suspend fun clearAllLocalData(preserveDemo: Boolean = false) {
+        if (preserveDemo && !preferences.areDemoMaterialsRemoved()) {
+            materialDao.deleteUserMaterials()
+            customerDao.deleteAll()
+            quoteDao.deleteAll()
+        } else {
+            materialDao.deleteAll()
+            customerDao.deleteAll()
+            quoteDao.deleteAll()
+        }
+    }
+
+    suspend fun deleteAllMaterials() {
         materialDao.deleteAll()
-        customerDao.deleteAll()
-        quoteDao.deleteAll()
-        ensureDemoDataSeeded()
+        preferences.setDemoMaterialsRemoved(true)
+        preferences.setDemoDataInitialized(true)
+    }
+
+    suspend fun deleteDemoData() {
+        val allMats = materialDao.getAllMaterialsList()
+        val demoMats = allMats.filter { DemoUtils.isDemoMaterial(it) }
+        if (demoMats.isNotEmpty()) {
+            materialDao.deleteByIds(demoMats.map { it.id })
+        }
+        materialDao.deleteDemoMaterials()
+        customerDao.deleteDemoCustomers()
+        quoteDao.deleteDemoQuotes()
+        preferences.setDemoMaterialsRemoved(true)
+        preferences.setDemoCustomersRemoved(true)
+        preferences.setDemoQuotesRemoved(true)
+        preferences.setDemoDataInitialized(true)
     }
 
     suspend fun ensureDemoDataSeeded() {
+        if (preferences.isDemoDataInitialized() || preferences.areDemoMaterialsRemoved()) {
+            return
+        }
         com.example.data.local.AppDatabase.seedDefaultDataIfEmpty(
             materialDao,
             customerDao,
-            quoteDao
+            quoteDao,
+            preferences
         )
+        preferences.setDemoDataInitialized(true)
+        preferences.setDemoDataSeeded(true)
     }
 
     // JSON Backup Export
@@ -100,10 +372,13 @@ class AgritechRepository(
         for (m in materials) {
             val obj = JSONObject().apply {
                 put("id", m.id)
+                put("internalCode", m.internalCode)
                 put("name", m.name)
                 put("unit", m.unit)
                 put("price", m.price)
                 put("category", m.category)
+                put("isDemo", m.isDemo)
+                put("userId", m.userId)
             }
             matArray.put(obj)
         }
@@ -246,17 +521,20 @@ class AgritechRepository(
                             list.add(
                                 MaterialEntity(
                                     id = o.optInt("id", 0),
+                                    internalCode = o.optString("internalCode", ""),
                                     name = name,
                                     unit = o.optString("unit", "Pcs"),
                                     price = o.optDouble("price", 0.0),
-                                    category = o.optString("category", "Jumla")
+                                    category = o.optString("category", "Jumla"),
+                                    isDemo = o.optBoolean("isDemo", false),
+                                    userId = o.optString("userId", currentUserId)
                                 )
                             )
                         }
                     }
                     if (list.isNotEmpty()) {
-                        materialDao.insertAll(list)
-                        materialsCount = list.size
+                        val processed = upsertMaterials(list, currentUserId)
+                        materialsCount = processed
                     }
                 }
             }
@@ -281,7 +559,24 @@ class AgritechRepository(
                         }
                     }
                     if (list.isNotEmpty()) {
-                        customerDao.insertAll(list)
+                        val existingCustomers = customerDao.getAllCustomersList()
+                        for (incoming in list) {
+                            val cleanName = incoming.name.trim()
+                            val cleanPhone = incoming.phone.trim()
+                            val match = existingCustomers.find {
+                                it.name.trim().equals(cleanName, ignoreCase = true) &&
+                                (cleanPhone.isBlank() || it.phone.trim() == cleanPhone)
+                            }
+                            if (match != null) {
+                                val updated = match.copy(
+                                    location = if (incoming.location.isNotBlank()) incoming.location else match.location,
+                                    notes = if (incoming.notes.isNotBlank()) incoming.notes else match.notes
+                                )
+                                customerDao.updateCustomer(updated)
+                            } else {
+                                customerDao.insertCustomer(incoming.copy(id = 0))
+                            }
+                        }
                         customersCount = list.size
                     }
                 }
@@ -319,7 +614,17 @@ class AgritechRepository(
                         }
                     }
                     if (list.isNotEmpty()) {
-                        quoteDao.insertAll(list)
+                        val existingQuotes = quoteDao.getAllQuotesList()
+                        for (incoming in list) {
+                            val cleanNum = incoming.number.trim()
+                            val match = existingQuotes.find { it.number.trim().equals(cleanNum, ignoreCase = true) }
+                            if (match != null) {
+                                val updated = incoming.copy(id = match.id)
+                                quoteDao.updateQuote(updated)
+                            } else {
+                                quoteDao.insertQuote(incoming.copy(id = 0))
+                            }
+                        }
                         quotesCount = list.size
                     }
                 }
@@ -353,23 +658,140 @@ class AgritechRepository(
         return importDataFromJsonDetailed(jsonStr).first
     }
 
-    suspend fun restoreFromPayload(payload: CloudBackupPayload): Boolean {
+    suspend fun restoreFromPayload(payload: CloudBackupPayload, currentUserId: String = ""): Boolean {
         return try {
             preferences.saveBusinessSettings(payload.business)
-            if (payload.materials.isNotEmpty()) {
-                materialDao.insertAll(payload.materials)
+            val user = if (currentUserId.isNotBlank()) currentUserId else payload.userId
+            
+            if (preferences.areDemoMaterialsRemoved()) {
+                materialDao.deleteAll()
+            } else {
+                materialDao.deleteUserMaterials()
             }
+            if (payload.materials.isNotEmpty()) {
+                val toInsert = payload.materials.map { m ->
+                    m.copy(
+                        userId = if (m.userId.isNotBlank()) m.userId else user,
+                        isDemo = false
+                    )
+                }
+                materialDao.insertAll(toInsert)
+            }
+            
+            customerDao.deleteAll()
             if (payload.customers.isNotEmpty()) {
                 customerDao.insertAll(payload.customers)
             }
+            
+            quoteDao.deleteAll()
             if (payload.quotes.isNotEmpty()) {
                 quoteDao.insertAll(payload.quotes)
             }
-            ensureDemoDataSeeded()
+            // Do NOT call ensureDemoDataSeeded()! Cloud data state is authoritative.
             true
         } catch (e: Exception) {
             e.printStackTrace()
             false
         }
+    }
+
+    suspend fun importMaterialsFromExcel(
+        inputStream: java.io.InputStream,
+        currentUserId: String = ""
+    ): com.example.ui.utils.ExcelImportReport {
+        val parseResult = com.example.ui.utils.ExcelMaterialParser.parse(inputStream)
+        return when (parseResult) {
+            is com.example.ui.utils.ExcelParseResult.Error -> {
+                com.example.ui.utils.ExcelImportReport(
+                    success = false,
+                    errorMessage = parseResult.message
+                )
+            }
+            is com.example.ui.utils.ExcelParseResult.Success -> {
+                val stats = applyExcelMaterials(parseResult.materials, currentUserId)
+                com.example.ui.utils.ExcelImportReport(
+                    success = true,
+                    addedCount = stats.first,
+                    updatedCount = stats.second,
+                    failedCount = parseResult.failedRows,
+                    totalProcessed = stats.first + stats.second
+                )
+            }
+        }
+    }
+
+    private suspend fun applyExcelMaterials(
+        materials: List<com.example.ui.utils.ParsedExcelMaterial>,
+        currentUserId: String
+    ): Pair<Int, Int> {
+        if (materials.isEmpty()) return Pair(0, 0)
+
+        val existing = materialDao.getAllMaterialsList().toMutableList()
+        val existingByKey = mutableMapOf<String, MaterialEntity>()
+
+        for (item in existing) {
+            val key = MaterialKeyUtils.getNaturalKey(item)
+            existingByKey[key] = item
+        }
+
+        val toUpdate = mutableListOf<MaterialEntity>()
+        val toInsert = mutableListOf<MaterialEntity>()
+
+        var added = 0
+        var updated = 0
+
+        for (incoming in materials) {
+            val canonicalCategory = MaterialCategoryUtils.getCanonicalCategory(incoming.category, incoming.name)
+            val key = MaterialKeyUtils.getNaturalKey(incoming.name, canonicalCategory, incoming.unit)
+            val match = existingByKey[key]
+
+            if (match != null) {
+                val updatedEntity = match.copy(
+                    name = incoming.name,
+                    category = canonicalCategory,
+                    unit = incoming.unit,
+                    price = incoming.price
+                )
+                if (match.id == 0) {
+                    val idx = toInsert.indexOfFirst { it.internalCode == match.internalCode }
+                    if (idx >= 0) {
+                        toInsert[idx] = updatedEntity
+                    }
+                } else {
+                    val idx = toUpdate.indexOfFirst { it.id == match.id }
+                    if (idx >= 0) {
+                        toUpdate[idx] = updatedEntity
+                    } else {
+                        toUpdate.add(updatedEntity)
+                        updated++
+                    }
+                }
+                existingByKey[key] = updatedEntity
+            } else {
+                val newCode = MaterialEntity.generateInternalCode()
+                val newEntity = MaterialEntity(
+                    id = 0,
+                    internalCode = newCode,
+                    name = incoming.name,
+                    category = canonicalCategory,
+                    unit = incoming.unit,
+                    price = incoming.price,
+                    isDemo = false,
+                    userId = currentUserId
+                )
+                toInsert.add(newEntity)
+                existingByKey[key] = newEntity
+                added++
+            }
+        }
+
+        if (toUpdate.isNotEmpty()) {
+            materialDao.updateAll(toUpdate)
+        }
+        if (toInsert.isNotEmpty()) {
+            materialDao.insertAll(toInsert)
+        }
+
+        return Pair(added, updated)
     }
 }

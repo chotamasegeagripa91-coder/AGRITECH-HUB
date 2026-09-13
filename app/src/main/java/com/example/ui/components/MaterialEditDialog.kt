@@ -16,28 +16,44 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.models.MaterialEntity
 import com.example.ui.theme.RoseError
 import com.example.ui.utils.AppStrings
+import com.example.ui.utils.MaterialCategoryUtils
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MaterialEditDialog(
     material: MaterialEntity?,
     language: String,
+    availableCategories: List<String> = emptyList(),
     onDismiss: () -> Unit,
     onSave: (MaterialEntity) -> Unit
 ) {
     val isEdit = material != null
     var name by remember { mutableStateOf(material?.name ?: "") }
-    var selectedCategory by remember {
+    
+    val initialCat = if (material != null) {
+        MaterialCategoryUtils.getCanonicalCategory(material.category, material.name)
+    } else {
+        MaterialCategoryUtils.ELECTRICAL
+    }
+    
+    var selectedCategory by remember { mutableStateOf(initialCat) }
+    var isCustomCategoryMode by remember {
         mutableStateOf(
-            if (material != null) com.example.ui.utils.MaterialCategoryUtils.getCanonicalCategory(material.category, material.name)
-            else com.example.ui.utils.MaterialCategoryUtils.ELECTRICAL
+            material != null && initialCat !in MaterialCategoryUtils.DEFAULT_CATEGORIES
         )
     }
+    var customCategoryText by remember {
+        mutableStateOf(
+            if (material != null && initialCat !in MaterialCategoryUtils.DEFAULT_CATEGORIES) initialCat else ""
+        )
+    }
+    
     var selectedUnit by remember { mutableStateOf(material?.unit ?: "Pcs") }
     var priceText by remember { mutableStateOf(if (material != null && material.price > 0) material.price.toLong().toString() else "") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -45,9 +61,17 @@ fun MaterialEditDialog(
     var categoryMenuExpanded by remember { mutableStateOf(false) }
     var unitMenuExpanded by remember { mutableStateOf(false) }
 
-    val categories = com.example.ui.utils.MaterialCategoryUtils.ITEM_CATEGORIES
+    // Combine standard categories and existing custom categories
+    val categoryOptions = remember(availableCategories) {
+        val base = MaterialCategoryUtils.DEFAULT_CATEGORIES.toMutableList()
+        val custom = availableCategories
+            .filter { it != "All" && it != "Zote" && it !in base && it.isNotBlank() }
+            .distinct()
+        base.addAll(custom)
+        base
+    }
 
-    val units = listOf("Pcs", "Roll", "Mita", "Set", "Box", "Pkt", "Kg", "Bati")
+    val units = listOf("Pcs", "Roll", "Mita", "Set", "Box", "Pkt", "Kg", "Bati", "Lita", "Mfuko", "Trip")
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -109,7 +133,7 @@ fun MaterialEditDialog(
                     onExpandedChange = { categoryMenuExpanded = !categoryMenuExpanded }
                 ) {
                     OutlinedTextField(
-                        value = selectedCategory,
+                        value = if (isCustomCategoryMode && customCategoryText.isNotBlank()) customCategoryText else selectedCategory,
                         onValueChange = {},
                         readOnly = true,
                         label = { Text(if (language == "sw") "Kundi la Kifaa" else "Category") },
@@ -123,16 +147,56 @@ fun MaterialEditDialog(
                         expanded = categoryMenuExpanded,
                         onDismissRequest = { categoryMenuExpanded = false }
                     ) {
-                        categories.forEach { cat ->
+                        categoryOptions.forEach { cat ->
                             DropdownMenuItem(
                                 text = { Text(cat) },
                                 onClick = {
                                     selectedCategory = cat
+                                    isCustomCategoryMode = false
                                     categoryMenuExpanded = false
                                 }
                             )
                         }
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = if (language == "sw") "+ Kundi Jipya (Custom Category)" else "+ Add Custom Category",
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            },
+                            onClick = {
+                                isCustomCategoryMode = true
+                                categoryMenuExpanded = false
+                            }
+                        )
                     }
+                }
+
+                // If Custom Category Mode is active, show custom input field
+                if (isCustomCategoryMode) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = customCategoryText,
+                        onValueChange = { customCategoryText = it },
+                        label = { Text(if (language == "sw") "Andika Jina la Kundi Jipya" else "Enter Custom Category Name") },
+                        placeholder = { Text("Mfano: Solar, CCTV, Kilimo, n.k.") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("custom_category_input"),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -215,13 +279,20 @@ fun MaterialEditDialog(
                                 errorMessage = if (language == "sw") "Tafadhali jaza jina la kifaa." else "Please enter material name."
                                 return@Button
                             }
+                            val finalCat = if (isCustomCategoryMode && customCategoryText.isNotBlank()) {
+                                MaterialCategoryUtils.formatCategoryName(customCategoryText)
+                            } else {
+                                selectedCategory
+                            }
                             val priceVal = priceText.toDoubleOrNull() ?: 0.0
                             val updated = MaterialEntity(
                                 id = material?.id ?: 0,
+                                internalCode = material?.internalCode ?: "",
                                 name = name.trim(),
-                                category = selectedCategory,
+                                category = finalCat,
                                 unit = selectedUnit,
-                                price = priceVal
+                                price = priceVal,
+                                isDemo = false
                             )
                             onSave(updated)
                         },

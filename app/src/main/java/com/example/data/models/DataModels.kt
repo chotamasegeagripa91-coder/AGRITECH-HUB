@@ -1,16 +1,34 @@
 package com.example.data.models
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
+import java.util.Locale
+import java.util.UUID
 
-@Entity(tableName = "materials")
+@Entity(
+    tableName = "materials",
+    indices = [
+        Index(value = ["internalCode"]),
+        Index(value = ["category", "name", "unit"])
+    ]
+)
 data class MaterialEntity(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val internalCode: String = "",
     val name: String,
     val unit: String = "Pcs",
     val price: Double = 0.0,
-    val category: String = "Jumla (General)"
-)
+    val category: String = "Jumla (General)",
+    val isDemo: Boolean = false,
+    val userId: String = ""
+) {
+    companion object {
+        fun generateInternalCode(): String {
+            return "MAT-" + UUID.randomUUID().toString().replace("-", "").take(10).uppercase(Locale.ROOT)
+        }
+    }
+}
 
 @Entity(tableName = "customers")
 data class CustomerEntity(
@@ -74,11 +92,20 @@ enum class LicenseType(val code: String, val titleSw: String, val titleEn: Strin
     TRIAL("trial", "Jaribio Siku 30 (Trial)", "30 Days (Trial)", 30, 0),
     MONTHLY("monthly", "Mwezi 1 (Monthly)", "1 Month (Monthly)", 30, 5000),
     QUARTERLY("quarterly", "Miezi 3 (Quarterly)", "3 Months (Quarterly)", 90, 12000),
-    YEARLY("yearly", "Mwaka 1 (Yearly)", "1 Year (Yearly)", 365, 30000),
+    SEMI_ANNUAL("semi_annual", "Miezi 6 (6 Months)", "6 Months", 180, 24000),
+    YEARLY("yearly", "Mwaka 1 (Yearly)", "1 Year (Yearly)", 365, 40000),
     LIFETIME("lifetime", "Maisha Yote (Lifetime)", "Lifetime (No Expiry)", null, 60000);
 
     companion object {
-        fun fromCode(code: String?): LicenseType = entries.find { it.code.equals(code, ignoreCase = true) } ?: LIFETIME
+        fun fromCode(code: String?): LicenseType = when (code?.lowercase(java.util.Locale.ROOT)) {
+            "trial" -> TRIAL
+            "monthly", "m", "month" -> MONTHLY
+            "quarterly", "q", "3months" -> QUARTERLY
+            "semi_annual", "semi-annual", "semiannual", "6months", "six_months", "half_year", "s", "h", "6" -> SEMI_ANNUAL
+            "yearly", "y", "year", "annual" -> YEARLY
+            "lifetime", "l", "life" -> LIFETIME
+            else -> entries.find { it.code.equals(code, ignoreCase = true) } ?: LIFETIME
+        }
     }
 }
 

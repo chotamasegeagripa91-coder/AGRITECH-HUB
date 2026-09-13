@@ -17,9 +17,11 @@ import androidx.credentials.exceptions.CreateCredentialException
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
+import com.google.android.gms.tasks.Tasks
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.FirebaseApp
+import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
 import com.google.firebase.auth.FirebaseAuthInvalidUserException
@@ -27,6 +29,7 @@ import com.google.firebase.auth.FirebaseAuthUserCollisionException
 import com.google.firebase.auth.FirebaseAuthWeakPasswordException
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -304,6 +307,61 @@ object FirebaseAuthManager {
     }
 
     /**
+     * Changes the password for the currently signed-in Firebase user directly without a reset link.
+     */
+    suspend fun changePassword(
+        currentPassword: String,
+        newPassword: String,
+        language: String = "sw",
+        context: Context? = null
+    ): AuthResult = withContext(Dispatchers.IO) {
+        val cleanCurrent = currentPassword.trim()
+        val cleanNew = newPassword.trim()
+
+        if (cleanNew.length < 6) {
+            return@withContext AuthResult(
+                success = false,
+                errorMessage = if (language == "sw") "Nenosiri jipya lazima liwe na angalau herufi 6." else "New password must be at least 6 characters."
+            )
+        }
+
+        val auth = FirebaseAuth.getInstance()
+        val currentUser = auth.currentUser
+
+        if (currentUser == null) {
+            return@withContext AuthResult(
+                success = false,
+                errorMessage = if (language == "sw") "Hakuna akaunti iliyoingia kwenye mfumo." else "No user account currently signed in."
+            )
+        }
+
+        try {
+            val email = currentUser.email
+            if (!email.isNullOrBlank() && cleanCurrent.isNotBlank()) {
+                val credential = com.google.firebase.auth.EmailAuthProvider.getCredential(email, cleanCurrent)
+                com.google.android.gms.tasks.Tasks.await(currentUser.reauthenticate(credential), 10, java.util.concurrent.TimeUnit.SECONDS)
+            }
+
+            com.google.android.gms.tasks.Tasks.await(currentUser.updatePassword(cleanNew), 10, java.util.concurrent.TimeUnit.SECONDS)
+            Log.d(TAG, "Password changed successfully for user: ${currentUser.uid}")
+
+            if (context != null && !email.isNullOrBlank()) {
+                try {
+                    savePasswordCredential(context, email, cleanNew, forceUpdate = true)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not update saved password in Credential Manager: ${e.message}")
+                }
+            }
+
+            AuthResult(success = true, uid = currentUser.uid, email = currentUser.email)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to change password", e)
+            val friendly = formatFriendlyError(e, language)
+            AuthResult(success = false, errorMessage = friendly)
+        }
+    }
+
+    /**
      * Signs in with Google using modern Android Credential Manager and Firebase Authentication.
      * Launches the official system account chooser, obtains Google ID token, converts to
      * Firebase Google credential via GoogleAuthProvider, and signs into Firebase.
@@ -436,14 +494,15 @@ object FirebaseAuthManager {
     suspend fun savePasswordCredential(
         context: Context,
         username: String,
-        password: String
+        password: String,
+        forceUpdate: Boolean = false
     ): Boolean {
-        val cleanUser = username.trim()
+        val cleanUser = username.trim().lowercase()
         val cleanPass = password.trim()
         if (cleanUser.isBlank() || cleanPass.isBlank()) return false
 
-        // Prevent duplicate prompts within 10 seconds for the same user account
-        if (cleanUser.equals(lastSavedUsername, ignoreCase = true) &&
+        // Prevent duplicate prompts within 10 seconds for the same user account unless forced
+        if (!forceUpdate && cleanUser.equals(lastSavedUsername, ignoreCase = true) &&
             (System.currentTimeMillis() - lastSavedTime) < 10_000L
         ) {
             Log.d(TAG, "Skipping duplicate credential save request within debounce window")
@@ -472,16 +531,9 @@ object FirebaseAuthManager {
                 lastSavedTime = System.currentTimeMillis()
                 Log.d(TAG, "Password credentials saved/updated successfully in system Credential Manager")
 
-                // Notify Android platform AutofillManager of completed login/registration
-                try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        val autofillManager = activity.getSystemService(AutofillManager::class.java)
-                        autofillManager?.commit()
-                        Log.d(TAG, "Platform AutofillManager committed successfully")
-                    }
-                } catch (e: Exception) {
-                    Log.d(TAG, "AutofillManager.commit warning: ${e.message}")
-                }
+                // Android Credential Manager is the modern and preferred way to save credentials.
+                // We intentionally do NOT call legacy AutofillManager.commit() here, as calling both
+                // causes Google Password Manager to create duplicate credential entries.
 
                 true
             } catch (e: CreateCredentialCancellationException) {

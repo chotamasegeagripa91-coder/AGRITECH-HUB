@@ -356,4 +356,39 @@ class AppPreferences(context: Context) {
             .putLong("agritech_last_backup_size", sizeBytes)
             .apply()
     }
+
+    fun isDemoDataSeeded(): Boolean = prefs.getBoolean("agritech_demo_seeded_v2", false)
+    fun setDemoDataSeeded(seeded: Boolean) {
+        prefs.edit().putBoolean("agritech_demo_seeded_v2", seeded).apply()
+    }
+
+    fun isDemoDataInitialized(): Boolean = prefs.getBoolean("agritech_demo_initialized_v3", false)
+    fun setDemoDataInitialized(initialized: Boolean) {
+        prefs.edit().putBoolean("agritech_demo_initialized_v3", initialized).apply()
+    }
+
+    fun areDemoMaterialsRemoved(): Boolean = prefs.getBoolean("agritech_demo_materials_removed", false)
+    fun setDemoMaterialsRemoved(removed: Boolean) {
+        prefs.edit().putBoolean("agritech_demo_materials_removed", removed).apply()
+    }
+
+    fun areDemoCustomersRemoved(): Boolean = prefs.getBoolean("agritech_demo_customers_removed", false)
+    fun setDemoCustomersRemoved(removed: Boolean) {
+        prefs.edit().putBoolean("agritech_demo_customers_removed", removed).apply()
+    }
+
+    fun areDemoQuotesRemoved(): Boolean = prefs.getBoolean("agritech_demo_quotes_removed", false)
+    fun setDemoQuotesRemoved(removed: Boolean) {
+        prefs.edit().putBoolean("agritech_demo_quotes_removed", removed).apply()
+    }
+
+    fun isMaterialDuplicateCleanupCompleted(): Boolean = prefs.getBoolean("agritech_material_dedup_completed_v1", false)
+    fun setMaterialDuplicateCleanupCompleted(completed: Boolean) {
+        prefs.edit().putBoolean("agritech_material_dedup_completed_v1", completed).apply()
+    }
+
+    fun getLastSyncUserId(): String = prefs.getString("agritech_last_sync_uid", "") ?: ""
+    fun setLastSyncUserId(uid: String) {
+        prefs.edit().putString("agritech_last_sync_uid", uid).apply()
+    }
 }

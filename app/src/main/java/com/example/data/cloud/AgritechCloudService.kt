@@ -611,10 +611,13 @@ class AgritechCloudService(context: Context) {
             for (m in payload.materials) {
                 val o = JSONObject().apply {
                     put("id", m.id)
+                    put("internalCode", m.internalCode)
                     put("name", m.name)
                     put("unit", m.unit)
                     put("price", m.price)
                     put("category", m.category)
+                    put("isDemo", m.isDemo)
+                    put("userId", m.userId)
                 }
                 mArr.put(o)
             }
@@ -705,10 +708,13 @@ class AgritechCloudService(context: Context) {
             val materialsListMap = payload.materials.map { m ->
                 hashMapOf<String, Any>(
                     "id" to m.id,
+                    "internalCode" to m.internalCode,
                     "name" to m.name,
                     "unit" to m.unit,
                     "price" to m.price,
-                    "category" to m.category
+                    "category" to m.category,
+                    "isDemo" to m.isDemo,
+                    "userId" to m.userId
                 )
             }
             val customersListMap = payload.customers.map { c ->
@@ -755,15 +761,38 @@ class AgritechCloudService(context: Context) {
             Tasks.await(backupTask, 10, TimeUnit.SECONDS)
 
             // Subcollections under /users/$uid/
-            for (m in payload.materials) {
-                val matMap = hashMapOf<String, Any>(
-                    "id" to m.id,
-                    "name" to m.name,
-                    "unit" to m.unit,
-                    "price" to m.price,
-                    "category" to m.category
-                )
-                userDocRef.collection("materials").document(m.id.toString()).set(matMap, SetOptions.merge())
+            try {
+                val matSnapshot = Tasks.await(userDocRef.collection("materials").get(), 5, TimeUnit.SECONDS)
+                val localMatIds = payload.materials.map { it.id.toString() }.toSet()
+                val batch = db.batch()
+                var batchCount = 0
+                for (doc in matSnapshot.documents) {
+                    if (!localMatIds.contains(doc.id)) {
+                        batch.delete(doc.reference)
+                        batchCount++
+                    }
+                }
+                if (batchCount > 0) {
+                    Tasks.await(batch.commit(), 5, TimeUnit.SECONDS)
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("AgritechCloudService", "Error cleaning deleted cloud materials: ${e.message}")
+            }
+
+            if (payload.materials.isNotEmpty()) {
+                for (m in payload.materials) {
+                    val matMap = hashMapOf<String, Any>(
+                        "id" to m.id,
+                        "internalCode" to m.internalCode,
+                        "name" to m.name,
+                        "unit" to m.unit,
+                        "price" to m.price,
+                        "category" to m.category,
+                        "isDemo" to m.isDemo,
+                        "userId" to m.userId
+                    )
+                    userDocRef.collection("materials").document(m.id.toString()).set(matMap, SetOptions.merge())
+                }
             }
 
             for (c in payload.customers) {
@@ -864,10 +893,13 @@ class AgritechCloudService(context: Context) {
                             materials.add(
                                 MaterialEntity(
                                     id = (m["id"] as? Number)?.toInt() ?: 0,
+                                    internalCode = m["internalCode"]?.toString() ?: "",
                                     name = m["name"]?.toString() ?: "Item",
                                     unit = m["unit"]?.toString() ?: "Pcs",
                                     price = (m["price"] as? Number)?.toDouble() ?: 0.0,
-                                    category = m["category"]?.toString() ?: "Jumla"
+                                    category = m["category"]?.toString() ?: "Jumla",
+                                    isDemo = (m["isDemo"] as? Boolean) ?: false,
+                                    userId = m["userId"]?.toString() ?: uid
                                 )
                             )
                         }
@@ -976,10 +1008,13 @@ class AgritechCloudService(context: Context) {
                     materials.add(
                         MaterialEntity(
                             id = o.optInt("id", 0),
+                            internalCode = o.optString("internalCode", ""),
                             name = o.optString("name", "Item"),
                             unit = o.optString("unit", "Pcs"),
                             price = o.optDouble("price", 0.0),
-                            category = o.optString("category", "Jumla")
+                            category = o.optString("category", "Jumla"),
+                            isDemo = o.optBoolean("isDemo", false),
+                            userId = o.optString("userId", uid)
                         )
                     )
                 }
@@ -1059,6 +1094,53 @@ class AgritechCloudService(context: Context) {
                 db.collection("users").document(uid).collection("materials").document(materialId.toString()).delete()
             } catch (e: Exception) {
                 android.util.Log.w("AgritechCloudService", "Firestore deleteMaterial error: ${e.message}")
+            }
+        }
+    }
+
+    fun deleteMaterialsByCategoryFromCloud(category: String, userId: String) {
+        val uid = getAuthenticatedFirebaseUid(userId)
+        if (uid.isNotBlank()) {
+            try {
+                val db = FirebaseFirestore.getInstance()
+                val userDocRef = db.collection("users").document(uid)
+                val matSnapshot = Tasks.await(userDocRef.collection("materials").get(), 5, TimeUnit.SECONDS)
+                val batch = db.batch()
+                var batchCount = 0
+                for (doc in matSnapshot.documents) {
+                    val cat = doc.getString("category") ?: ""
+                    val name = doc.getString("name") ?: ""
+                    if (com.example.ui.utils.MaterialCategoryUtils.matchesCategory(com.example.data.models.MaterialEntity(name = name, category = cat, unit = "", price = 0.0), category)) {
+                        batch.delete(doc.reference)
+                        batchCount++
+                    }
+                }
+                if (batchCount > 0) {
+                    Tasks.await(batch.commit(), 5, TimeUnit.SECONDS)
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("AgritechCloudService", "Firestore deleteMaterialsByCategory error: ${e.message}")
+            }
+        }
+    }
+
+    fun deleteAllMaterialsFromCloud(userId: String) {
+        val uid = getAuthenticatedFirebaseUid(userId)
+        if (uid.isNotBlank()) {
+            try {
+                val db = FirebaseFirestore.getInstance()
+                val userDocRef = db.collection("users").document(uid)
+                val matSnapshot = Tasks.await(userDocRef.collection("materials").get(), 5, TimeUnit.SECONDS)
+                val batch = db.batch()
+                for (doc in matSnapshot.documents) {
+                    batch.delete(doc.reference)
+                }
+                // Also update latest backup if it exists
+                val backupDoc = userDocRef.collection("backups").document("latest")
+                batch.update(backupDoc, "materials", emptyList<Map<String, Any>>(), "materialsCount", 0)
+                Tasks.await(batch.commit(), 5, TimeUnit.SECONDS)
+            } catch (e: Exception) {
+                android.util.Log.w("AgritechCloudService", "Firestore deleteAllMaterials error: ${e.message}")
             }
         }
     }

@@ -25,6 +25,8 @@ object AppStrings {
             "stat_materials_count" -> if (isSw) "Aina za Vifaa" else "Material Items"
             "stat_customers_count" -> if (isSw) "Wateja Waliosajiliwa" else "Saved Customers"
             "stat_total_value" -> if (isSw) "Jumla ya Thamani" else "Total Projected Value"
+            "stat_labour_charges" -> if (isSw) "Gharama za Ufundi" else "Labour Charges"
+            "stat_total_project_value" -> if (isSw) "Jumla ya Miradi" else "Total Project Value"
 
             "quick_new_quote" -> if (isSw) "Tengeneza Makadirio Mapya" else "Create New Quote"
             "quick_add_customer" -> if (isSw) "Ongeza Mteja Mpya" else "Add New Customer"

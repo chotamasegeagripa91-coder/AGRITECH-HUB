@@ -157,7 +157,7 @@ fun AuthScreen(
 
     val regPasswordAutofillNode = remember {
         AutofillNode(
-            autofillTypes = listOf(AutofillType.NewPassword, AutofillType.Password),
+            autofillTypes = listOf(AutofillType.NewPassword),
             onFill = { filledText ->
                 regPassword = filledText
                 registerError = null
@@ -167,7 +167,7 @@ fun AuthScreen(
 
     val regConfirmPasswordAutofillNode = remember {
         AutofillNode(
-            autofillTypes = listOf(AutofillType.NewPassword, AutofillType.Password),
+            autofillTypes = listOf(AutofillType.NewPassword),
             onFill = { filledText ->
                 regConfirmPassword = filledText
                 registerError = null
@@ -175,12 +175,15 @@ fun AuthScreen(
         )
     }
 
-    SideEffect {
-        autofillTree += emailAutofillNode
-        autofillTree += passwordAutofillNode
-        autofillTree += regEmailAutofillNode
-        autofillTree += regPasswordAutofillNode
-        autofillTree += regConfirmPasswordAutofillNode
+    LaunchedEffect(currentTab) {
+        if (currentTab == AuthTab.LOGIN) {
+            autofillTree += emailAutofillNode
+            autofillTree += passwordAutofillNode
+        } else {
+            autofillTree += regEmailAutofillNode
+            autofillTree += regPasswordAutofillNode
+            autofillTree += regConfirmPasswordAutofillNode
+        }
     }
 
     // Interaction sources for tap detection on fields
@@ -302,7 +305,7 @@ fun AuthScreen(
 
     // Primary Login Execution
     fun performLogin() {
-        val cleanEmail = loginEmail.trim()
+        val cleanEmail = loginEmail.trim().lowercase()
         val cleanPassword = loginPassword.trim()
 
         if (cleanEmail.isBlank()) {
@@ -397,7 +400,7 @@ fun AuthScreen(
         val cleanBiz = regBusinessName.trim()
         val cleanOwner = regOwnerFullName.trim()
         val cleanPhone = regPhoneNumber.trim()
-        val cleanEmail = regEmail.trim()
+        val cleanEmail = regEmail.trim().lowercase()
         val cleanPwd = regPassword.trim()
         val cleanConfirm = regConfirmPassword.trim()
 

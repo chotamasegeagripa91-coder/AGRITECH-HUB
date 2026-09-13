@@ -12,7 +12,10 @@ import com.example.data.local.AppPreferences
 import com.example.data.models.*
 import com.example.data.repository.AgritechRepository
 import com.example.data.security.SecurityUtils
+import com.example.util.NetworkMonitor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -20,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 
 enum class AppScreen {
@@ -42,6 +46,10 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
         quoteDao = database.quoteDao(),
         preferences = preferences
     )
+    private val networkMonitor = NetworkMonitor(application)
+    private val syncMutex = Mutex()
+
+    val isOnline: Flow<Boolean> = networkMonitor.isOnline
 
     val materials: StateFlow<List<MaterialEntity>> = repository.allMaterials
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -96,7 +104,19 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
     init {
         refreshLicenseInfo()
         viewModelScope.launch(Dispatchers.IO) {
-            repository.ensureDemoDataSeeded()
+            if (!preferences.isDemoDataInitialized()) {
+                repository.ensureDemoDataSeeded()
+            }
+            repository.cleanupDuplicateMaterialsOnce()
+        }
+
+        // Automatically sync data with Firebase whenever an internet connection is detected
+        viewModelScope.launch {
+            networkMonitor.isOnline.collect { online ->
+                if (online && _isUserRegistered.value) {
+                    triggerAutoSync(silent = true, delayMs = 1200L)
+                }
+            }
         }
     }
 
@@ -188,7 +208,7 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
 
         if (response.success && response.data != null) {
             val account = response.data
-            runBlocking(Dispatchers.IO) { repository.clearAllLocalData() }
+            runBlocking(Dispatchers.IO) { repository.clearAllLocalData(preserveDemo = true) }
             preferences.saveUserAccount(account)
             preferences.setPassword(password)
             preferences.setTrialStartDate(account.trialStartDate)
@@ -209,7 +229,7 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             _currentScreen.value = AppScreen.DASHBOARD
             refreshLicenseInfo()
 
-            syncDataToCloud()
+            triggerAutoSync(silent = true, delayMs = 500L)
         }
         return response
     }
@@ -243,7 +263,7 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             refreshLicenseInfo()
 
             // Initial cloud backup synchronization
-            syncDataToCloud()
+            triggerAutoSync(silent = true, delayMs = 500L)
         }
         return response
     }
@@ -274,7 +294,7 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             _isLocked.value = false
             refreshLicenseInfo()
 
-            syncDataToCloud()
+            triggerAutoSync(silent = true, delayMs = 500L)
         }
         return response
     }
@@ -298,7 +318,7 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
         }
         if (response.success && response.data != null) {
             val account = response.data
-            runBlocking(Dispatchers.IO) { repository.clearAllLocalData() }
+            runBlocking(Dispatchers.IO) { repository.clearAllLocalData(preserveDemo = true) }
             preferences.saveUserAccount(account)
             preferences.setPassword(password)
 
@@ -331,18 +351,23 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
                     val restoreRes = cloudService.restoreBackupFromCloud(account.userId)
                     var restoredData = false
                     if (restoreRes.success && restoreRes.data != null) {
-                        repository.restoreFromPayload(restoreRes.data)
+                        repository.restoreFromPayload(restoreRes.data, account.userId)
+                        repository.cleanupDuplicateMaterialsOnce()
                         _businessSettings.value = preferences.getBusinessSettings()
                         preferences.setLastCloudSyncTime(restoreRes.data.timestamp)
                         _lastCloudSyncTime.value = restoreRes.data.timestamp
                         refreshLicenseInfo()
                         restoredData = true
                     }
+                    // Trigger immediate background sync right after successful login & restore check
+                    triggerAutoSync(silent = true, delayMs = 600L)
                     withContext(Dispatchers.Main) {
                         onComplete(response, restoredData)
                     }
                 }
                 return
+            } else {
+                triggerAutoSync(silent = true, delayMs = 600L)
             }
         }
         onComplete(response, false)
@@ -367,7 +392,7 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
         )
         if (response.success && response.data != null) {
             val account = response.data
-            runBlocking(Dispatchers.IO) { repository.clearAllLocalData() }
+            runBlocking(Dispatchers.IO) { repository.clearAllLocalData(preserveDemo = true) }
             preferences.saveUserAccount(account)
 
             // Update business identity
@@ -398,18 +423,23 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
                     val restoreRes = cloudService.restoreBackupFromCloud(account.userId)
                     var restoredData = false
                     if (restoreRes.success && restoreRes.data != null) {
-                        repository.restoreFromPayload(restoreRes.data)
+                        repository.restoreFromPayload(restoreRes.data, account.userId)
+                        repository.cleanupDuplicateMaterialsOnce()
                         _businessSettings.value = preferences.getBusinessSettings()
                         preferences.setLastCloudSyncTime(restoreRes.data.timestamp)
                         _lastCloudSyncTime.value = restoreRes.data.timestamp
                         refreshLicenseInfo()
                         restoredData = true
                     }
+                    // Trigger immediate background sync right after successful Google login & restore check
+                    triggerAutoSync(silent = true, delayMs = 600L)
                     withContext(Dispatchers.Main) {
                         onComplete(response, restoredData)
                     }
                 }
                 return
+            } else {
+                triggerAutoSync(silent = true, delayMs = 600L)
             }
         }
         onComplete(response, false)
@@ -441,6 +471,55 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
 
     fun resendOtp(emailOrPhone: String): AgritechCloudService.ServerResponse<String> {
         return cloudService.resendOtp(emailOrPhone)
+    }
+
+    /**
+     * Automatically and safely synchronizes data with Firebase in the background.
+     * Guaranteed not to block UI, not to duplicate requests (Mutex protected),
+     * filters out demo data, and prevents duplicate records.
+     */
+    fun triggerAutoSync(silent: Boolean = true, delayMs: Long = 800L) {
+        val user = _userAccount.value ?: preferences.getUserAccount()
+        if (user == null || !user.isVerified) return
+
+        viewModelScope.launch(Dispatchers.IO) {
+            if (delayMs > 0L) {
+                delay(delayMs)
+            }
+            if (!networkMonitor.isConnected()) return@launch
+
+            if (syncMutex.tryLock()) {
+                try {
+                    _isCloudSyncing.value = true
+                    // Filter out DEMO/SAMPLE items so they are NEVER uploaded as real user data to Firestore
+                    val realMaterials = materials.value.filter { !com.example.ui.utils.DemoUtils.isDemoMaterial(it) }
+                    val realCustomers = customers.value.filter { !com.example.ui.utils.DemoUtils.isDemoCustomer(it) }
+                    val realQuotes = quotes.value.filter { !com.example.ui.utils.DemoUtils.isDemoQuote(it) }
+
+                    val payload = CloudBackupPayload(
+                        version = 1,
+                        timestamp = System.currentTimeMillis(),
+                        userId = user.userId,
+                        business = preferences.getBusinessSettings(),
+                        materials = realMaterials,
+                        customers = realCustomers,
+                        quotes = realQuotes,
+                        licenseInfo = licenseInfo.value
+                    )
+
+                    val res = cloudService.syncBackupToCloud(payload)
+                    if (res.success) {
+                        preferences.setLastCloudSyncTime(payload.timestamp)
+                        _lastCloudSyncTime.value = payload.timestamp
+                    }
+                } catch (e: Exception) {
+                    // Silent background catch
+                } finally {
+                    _isCloudSyncing.value = false
+                    syncMutex.unlock()
+                }
+            }
+        }
     }
 
     fun syncDataToCloud(onComplete: (Boolean, String) -> Unit = { _, _ -> }) {
@@ -504,7 +583,8 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             try {
                 val res = cloudService.restoreBackupFromCloud(user.userId)
                 if (res.success && res.data != null) {
-                    repository.restoreFromPayload(res.data)
+                    repository.restoreFromPayload(res.data, user.userId)
+                    repository.cleanupDuplicateMaterialsOnce()
                     _businessSettings.value = preferences.getBusinessSettings()
                     preferences.setLastCloudSyncTime(res.data.timestamp)
                     _lastCloudSyncTime.value = res.data.timestamp
@@ -530,7 +610,7 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
 
     fun logoutUser() {
         viewModelScope.launch(Dispatchers.IO) {
-            repository.clearAllLocalData()
+            repository.clearAllLocalData(preserveDemo = true)
         }
         preferences.clearAuthSession()
         _userAccount.value = null
@@ -625,14 +705,21 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
 
     // Material Operations
     fun insertMaterial(material: MaterialEntity) {
+        val currentUid = userAccount.value?.userId ?: ""
         viewModelScope.launch(Dispatchers.IO) {
-            repository.insertMaterial(material)
+            val toInsert = material.copy(
+                isDemo = false,
+                userId = currentUid
+            )
+            repository.insertMaterial(toInsert)
+            triggerAutoSync(silent = true, delayMs = 600L)
         }
     }
 
     fun updateMaterial(material: MaterialEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.updateMaterial(material)
+            triggerAutoSync(silent = true, delayMs = 600L)
         }
     }
 
@@ -641,6 +728,81 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             repository.deleteMaterial(material)
             val currentUid = userAccount.value?.userId ?: ""
             cloudService.deleteMaterialFromCloud(material.id, currentUid)
+            triggerAutoSync(silent = true, delayMs = 600L)
+        }
+    }
+
+    fun deleteAllMaterials(onComplete: () -> Unit = {}) {
+        val currentUid = userAccount.value?.userId ?: ""
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteAllMaterials()
+            preferences.setDemoMaterialsRemoved(true)
+            preferences.setDemoDataInitialized(true)
+            cloudService.deleteAllMaterialsFromCloud(currentUid)
+            triggerAutoSync(silent = true, delayMs = 400L)
+            withContext(Dispatchers.Main) {
+                onComplete()
+            }
+        }
+    }
+
+    fun deleteMaterialsByCategory(category: String, onComplete: () -> Unit = {}) {
+        val currentUid = userAccount.value?.userId ?: ""
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteMaterialsByCategory(category)
+            if (category.equals(com.example.ui.utils.MaterialCategoryUtils.ELECTRICAL, ignoreCase = true) ||
+                category.equals(com.example.ui.utils.MaterialCategoryUtils.PLUMBING, ignoreCase = true) ||
+                category.equals(com.example.ui.utils.MaterialCategoryUtils.CONSTRUCTION, ignoreCase = true)
+            ) {
+                preferences.setDemoMaterialsRemoved(true)
+            }
+            cloudService.deleteMaterialsByCategoryFromCloud(category, currentUid)
+            triggerAutoSync(silent = true, delayMs = 400L)
+            withContext(Dispatchers.Main) {
+                onComplete()
+            }
+        }
+    }
+
+    suspend fun changePassword(
+        currentPassword: String,
+        newPassword: String
+    ): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val lang = _language.value
+        val result = com.example.data.cloud.FirebaseAuthManager.changePassword(
+            currentPassword = currentPassword,
+            newPassword = newPassword,
+            language = lang,
+            context = getApplication()
+        )
+        if (result.success) {
+            // Update locally stored password for offline credential continuity
+            preferences.setPassword(newPassword)
+            val successMsg = if (lang == "sw") "Nenosiri limebadilishwa kikamilifu!" else "Password changed successfully!"
+            Pair(true, successMsg)
+        } else {
+            val errorMsg = result.errorMessage ?: (if (lang == "sw") "Imeshindwa kubadili nenosiri" else "Failed to change password")
+            Pair(false, errorMsg)
+        }
+    }
+
+    fun deleteDemoData(onComplete: () -> Unit = {}) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteDemoData()
+            preferences.setDemoMaterialsRemoved(true)
+            preferences.setDemoCustomersRemoved(true)
+            preferences.setDemoQuotesRemoved(true)
+            preferences.setDemoDataInitialized(true)
+            withContext(Dispatchers.Main) {
+                onComplete()
+            }
+        }
+    }
+
+    suspend fun importMaterialsFromExcel(inputStream: java.io.InputStream): com.example.ui.utils.ExcelImportReport {
+        val currentUid = userAccount.value?.userId ?: ""
+        return withContext(Dispatchers.IO) {
+            repository.importMaterialsFromExcel(inputStream, currentUid)
         }
     }
 
@@ -648,12 +810,14 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
     fun insertCustomer(customer: CustomerEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.insertCustomer(customer)
+            triggerAutoSync(silent = true, delayMs = 600L)
         }
     }
 
     fun updateCustomer(customer: CustomerEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.updateCustomer(customer)
+            triggerAutoSync(silent = true, delayMs = 600L)
         }
     }
 
@@ -662,6 +826,7 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             repository.deleteCustomer(customer)
             val currentUid = userAccount.value?.userId ?: ""
             cloudService.deleteCustomerFromCloud(customer.id, currentUid)
+            triggerAutoSync(silent = true, delayMs = 600L)
         }
     }
 
@@ -669,24 +834,28 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
     fun insertQuote(quote: QuoteEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.insertQuote(quote)
+            triggerAutoSync(silent = true, delayMs = 600L)
         }
     }
 
     fun updateQuote(quote: QuoteEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.updateQuote(quote)
+            triggerAutoSync(silent = true, delayMs = 600L)
         }
     }
 
     fun convertToInvoice(id: Int, newNumber: String) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.convertToInvoice(id, newNumber)
+            triggerAutoSync(silent = true, delayMs = 600L)
         }
     }
 
     fun setQuotePaidStatus(id: Int, paid: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.setPaidStatus(id, paid)
+            triggerAutoSync(silent = true, delayMs = 600L)
         }
     }
 
@@ -695,6 +864,7 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             repository.deleteQuote(quote)
             val currentUid = userAccount.value?.userId ?: ""
             cloudService.deleteQuoteFromCloud(quote.id, currentUid)
+            triggerAutoSync(silent = true, delayMs = 600L)
         }
     }
 

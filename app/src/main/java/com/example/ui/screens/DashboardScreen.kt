@@ -49,8 +49,10 @@ fun DashboardScreen(
 ) {
     val totalQuotesCount = quotes.count { it.status == "quotation" }
     val totalInvoicesCount = quotes.count { it.status == "invoice" }
-    val grandTotalValue = quotes.sumOf { it.grandTotal }
-    val paidTotalValue = quotes.filter { it.paid }.sumOf { it.grandTotal }
+    val totalLabourCharges = quotes.sumOf { it.labour }
+    val paidLabourCharges = quotes.filter { it.paid }.sumOf { it.labour }
+    val totalProjectValue = quotes.sumOf { it.grandTotal }
+    val paidProjectValue = quotes.filter { it.paid }.sumOf { it.grandTotal }
 
     LazyColumn(
         modifier = Modifier
@@ -292,50 +294,119 @@ fun DashboardScreen(
                     )
                 }
 
-                // Bottom Full Width Card (Total Projected Revenue)
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth()
+                // Bottom Row: Two Prominent Project Value Cards (Labour Charges & Total Project Value)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    // 1. Labour Charges Card
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("dashboard_labour_charges_card")
                     ) {
-                        Column {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = AppStrings.t("stat_labour_charges", language),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(AmberPrimary.copy(alpha = 0.2f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Build,
+                                        contentDescription = null,
+                                        tint = AmberPrimary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
                             Text(
-                                text = AppStrings.t("stat_total_value", language),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = Formatters.formatCurrency(grandTotalValue),
-                                style = MaterialTheme.typography.titleLarge.copy(
+                                text = Formatters.formatCurrency(totalLabourCharges),
+                                style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Black,
-                                    fontSize = 20.sp
+                                    fontSize = 17.sp
                                 ),
-                                color = MaterialTheme.colorScheme.primary
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1
                             )
                             Text(
-                                text = "Zilizolipwa: ${Formatters.formatCurrency(paidTotalValue)}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = EmeraldSuccess
+                                text = if (language == "sw") "Zilizolipwa: ${Formatters.formatCurrency(paidLabourCharges)}" else "Paid: ${Formatters.formatCurrency(paidLabourCharges)}",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                color = EmeraldSuccess,
+                                maxLines = 1
                             )
                         }
+                    }
 
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(AmberPrimary.copy(alpha = 0.2f)),
-                            contentAlignment = Alignment.Center
+                    // 2. Total Project Value Card (Materials + Labour)
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("dashboard_total_project_value_card")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.AccountBalanceWallet,
-                                contentDescription = null,
-                                tint = AmberPrimary,
-                                modifier = Modifier.size(24.dp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = AppStrings.t("stat_total_project_value", language),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(EmeraldSuccess.copy(alpha = 0.2f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AccountBalanceWallet,
+                                        contentDescription = null,
+                                        tint = EmeraldSuccess,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                            Text(
+                                text = Formatters.formatCurrency(totalProjectValue),
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 17.sp
+                                ),
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = if (language == "sw") "Vifaa + Ufundi (${Formatters.formatCurrency(paidProjectValue)})" else "Materials + Labour (${Formatters.formatCurrency(paidProjectValue)})",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
                             )
                         }
                     }

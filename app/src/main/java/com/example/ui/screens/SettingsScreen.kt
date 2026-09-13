@@ -34,6 +34,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -76,6 +78,8 @@ fun SettingsScreen(
     isSyncing: Boolean = false,
     onSyncCloud: () -> Unit = {},
     onRestoreCloud: () -> Unit = {},
+    onDeleteDemoData: (() -> Unit)? = null,
+    onChangePassword: (suspend (String, String) -> Pair<Boolean, String>)? = null,
     onLogout: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -326,31 +330,6 @@ fun SettingsScreen(
         val clip = ClipData.newPlainText(label, text)
         clipboard.setPrimaryClip(clip)
         Toast.makeText(context, "$label ${if (language == "sw") "Imenakiliwa!" else "Copied!"}", Toast.LENGTH_SHORT).show()
-    }
-
-    fun shareApp() {
-        val shareText = if (language == "sw") {
-            "⚡ *AGRITECH HUB - Electrical Solution*\n" +
-            "Mfumo bora na rahisi wa kutengeneza Makadirio ya Vifaa vya Umeme (Quotations), Ankara za Malipo (Invoices), na Kusimamia Stoo bila intaneti (100% Offline).\n\n" +
-            "Wasiliana nasi: +255 627 318 891 / +255 650 549 735\n" +
-            "Barua Pepe: agritechelectricalsolution@gmail.com\n" +
-            "Powered by Agritech"
-        } else {
-            "⚡ *AGRITECH HUB - Electrical Solution*\n" +
-            "The premier offline electrical materials estimation, quotation, invoicing, and inventory management system (100% Offline).\n\n" +
-            "Contact us: +255 627 318 891 / +255 650 549 735\n" +
-            "Email: agritechelectricalsolution@gmail.com\n" +
-            "Powered by Agritech"
-        }
-        val sendIntent = Intent(Intent.ACTION_SEND).apply {
-            putExtra(Intent.EXTRA_TEXT, shareText)
-            type = "text/plain"
-        }
-        try {
-            context.startActivity(Intent.createChooser(sendIntent, if (language == "sw") "Shiriki AGRITECH HUB" else "Share AGRITECH HUB"))
-        } catch (e: Exception) {
-            Toast.makeText(context, "Error sharing app", Toast.LENGTH_SHORT).show()
-        }
     }
 
     LazyColumn(
@@ -926,55 +905,30 @@ fun SettingsScreen(
             }
         }
 
-        // 4. Share App Feature
+        // 4. Data & Backup
         item {
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().testTag("data_and_backup_card")
             ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = if (language == "sw") "Shiriki App na Mafundi / Wateja" else "Share App with Electricians / Clients",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                    )
-                    Text(
-                        text = if (language == "sw") "Sambaza mfumo huu wa kisasa kwa wataalamu wengine wa umeme na wakandarasi." else "Share this modern offline system with other electrical experts and contractors.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Button(
-                        onClick = { shareApp() },
-                        modifier = Modifier.fillMaxWidth().height(46.dp).testTag("settings_share_app_btn"),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess, contentColor = Color.White)
-                    ) {
-                        Icon(imageVector = Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(if (language == "sw") "Shiriki App ya AGRITECH HUB" else "Share AGRITECH HUB App", fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
-        // 5. Data Backup & Restore
-        item {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = if (language == "sw") "Hifadhi ya Nakala (Backup & Restore)" else "Data Backup & Restore",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                        )
+                        Column {
+                            Text(
+                                text = if (language == "sw") "Hifadhi ya Data (Data & Backup)" else "Data & Backup",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                            Text(
+                                text = if (language == "sw") "Mfumo wa wingu (Cloud) na faili la simu (Local)" else "Cloud sync and optional local file backup",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         Icon(
                             imageVector = Icons.Default.Storage,
                             contentDescription = null,
@@ -982,170 +936,341 @@ fun SettingsScreen(
                         )
                     }
 
-                    Text(
-                        text = if (language == "sw")
-                            "Hifadhi data zako zote (vifaa, wateja, makadirio na ankara) kama faili halisi kwenye simu yako (.json), au rejesha data kwa kuchagua faili la backup kutoka kwenye simu."
-                        else
-                            "Save all your data (materials, customers, quotes, and invoices) as a real file on your device (.json), or restore data by selecting a backup file from your phone storage.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    // 5A. Cloud Sync (Main Automatic System)
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, AmberPrimary.copy(alpha = 0.3f)),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Button(
-                            onClick = {
-                                val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-                                val ownerOrBiz = (userAccount?.ownerFullName?.ifBlank { null }
-                                    ?: businessSettings.name.ifBlank { null }
-                                    ?: "AGRITECH_User").replace(Regex("[^a-zA-Z0-9]"), "_")
-                                val suggestedName = "${ownerOrBiz}_AGRITECH_Backup_$timeStamp.json"
-                                createBackupLauncher.launch(suggestedName)
-                            },
-                            enabled = !isProcessingBackup && !isProcessingRestore,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(46.dp)
-                                .testTag("export_backup_btn"),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary, contentColor = Color.Black)
-                        ) {
-                            if (isProcessingBackup) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.Black, strokeWidth = 2.dp)
-                            } else {
-                                Icon(imageVector = Icons.Default.SaveAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (language == "sw") "Backup Data" else "Backup Data",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(AmberPrimary.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.CloudSync, contentDescription = null, tint = AmberPrimary, modifier = Modifier.size(20.dp))
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = if (language == "sw") "Hifadhi ya Wingu (Cloud Sync — Mfumo Mkuu)" else "Cloud Sync (Main Automatic System)",
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                    Text(
+                                        text = if (language == "sw") "Usawazishaji wa moja kwa moja na Firebase" else "Automatic synchronization with Firebase",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
-                        }
 
-                        OutlinedButton(
-                            onClick = {
-                                openBackupLauncher.launch(arrayOf("application/json", "application/octet-stream", "text/*", "*/*"))
-                            },
-                            enabled = !isProcessingBackup && !isProcessingRestore,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(46.dp)
-                                .testTag("import_backup_btn"),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            if (isProcessingRestore) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                            } else {
-                                Icon(imageVector = Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (language == "sw") "Restore Data" else "Restore Data",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                            Text(
+                                text = if (lastSyncTime > 0) {
+                                    val timeStr = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(lastSyncTime))
+                                    if (language == "sw") "Wingu lilisawazishwa mwisho: $timeStr" else "Last cloud sync: $timeStr"
+                                } else {
+                                    if (language == "sw") "Mfumo unahifadhi ndani ya simu kwanza (Offline-First) na kusawazisha wingu pindi mtandao unapopatikana."
+                                    else "System operates offline-first and syncs to cloud whenever connected."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = onSyncCloud,
+                                    enabled = !isSyncing,
+                                    modifier = Modifier.weight(1f).height(44.dp).testTag("cloud_sync_now_btn"),
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary, contentColor = Color.Black)
+                                ) {
+                                    if (isSyncing) {
+                                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.Black, strokeWidth = 2.dp)
+                                    } else {
+                                        Icon(imageVector = Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(if (language == "sw") "Cloud Sync" else "Cloud Sync", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                OutlinedButton(
+                                    onClick = onRestoreCloud,
+                                    enabled = !isSyncing,
+                                    modifier = Modifier.weight(1f).height(44.dp).testTag("cloud_restore_now_btn"),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Icon(imageVector = Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(if (language == "sw") "Restore from Cloud" else "Restore from Cloud", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                }
                             }
                         }
                     }
 
-                    // Saved Backup File Card
-                    if (lastSavedBackupName != null) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.surface,
-                            shape = RoundedCornerShape(12.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            modifier = Modifier.fillMaxWidth().testTag("saved_backup_file_card")
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    // 5B. Local Backup to File (Optional Manual Backup)
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(42.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(AmberPrimary.copy(alpha = 0.15f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.InsertDriveFile,
-                                            contentDescription = null,
-                                            tint = AmberPrimary,
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                    }
+                                    Icon(Icons.Default.FolderZip, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = if (language == "sw") "Hifadhi kwenye Faili (Local Backup — Hiari)" else "Backup to File (Optional Local Backup)",
+                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                    Text(
+                                        text = if (language == "sw") "Hifadhi data zako kama faili halisi la .json kwenye simu" else "Save data as a local .json file on your phone storage",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
 
-                                    Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = {
+                                        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                                        val ownerOrBiz = (userAccount?.ownerFullName?.ifBlank { null }
+                                            ?: businessSettings.name.ifBlank { null }
+                                            ?: "AGRITECH_User").replace(Regex("[^a-zA-Z0-9]"), "_")
+                                        val suggestedName = "${ownerOrBiz}_AGRITECH_Backup_$timeStamp.json"
+                                        createBackupLauncher.launch(suggestedName)
+                                    },
+                                    enabled = !isProcessingBackup && !isProcessingRestore,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(44.dp)
+                                        .testTag("export_backup_btn"),
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary, contentColor = Color.Black)
+                                ) {
+                                    if (isProcessingBackup) {
+                                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.Black, strokeWidth = 2.dp)
+                                    } else {
+                                        Icon(imageVector = Icons.Default.SaveAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
                                         Text(
-                                            text = lastSavedBackupName ?: "AgritechHub_Backup.json",
-                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                            maxLines = 1
-                                        )
-                                        val timeStr = if (lastSavedBackupTime > 0L) {
-                                            SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(lastSavedBackupTime))
-                                        } else ""
-                                        val sizeStr = if (lastSavedBackupSize > 0L) {
-                                            val kb = lastSavedBackupSize / 1024.0
-                                            String.format(Locale.getDefault(), "%.1f KB", kb)
-                                        } else "JSON"
-                                        Text(
-                                            text = listOf(sizeStr, timeStr, if (language == "sw") "Hifadhi ya Simu" else "Device Storage")
-                                                .filter { it.isNotBlank() }
-                                                .joinToString(" • "),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            text = if (language == "sw") "Backup to File" else "Backup to File",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
 
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.End,
-                                    verticalAlignment = Alignment.CenterVertically
+                                OutlinedButton(
+                                    onClick = {
+                                        openBackupLauncher.launch(arrayOf("application/json", "application/octet-stream", "text/*", "*/*"))
+                                    },
+                                    enabled = !isProcessingBackup && !isProcessingRestore,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(44.dp)
+                                        .testTag("import_backup_btn"),
+                                    shape = RoundedCornerShape(10.dp)
                                 ) {
-                                    TextButton(
-                                        onClick = {
-                                            var targetFile = lastSavedLocalFile
-                                            if (targetFile == null || !targetFile.exists()) {
-                                                val backupDir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir, "backups")
-                                                if (!backupDir.exists()) backupDir.mkdirs()
-                                                val f = File(backupDir, lastSavedBackupName ?: "AgritechHub_Backup.json")
-                                                f.writeText(onExportBackup(), Charsets.UTF_8)
-                                                targetFile = f
-                                                lastSavedLocalFile = f
-                                            }
-                                            shareBackupFile(targetFile)
-                                        },
-                                        modifier = Modifier.testTag("share_backup_file_btn")
-                                    ) {
-                                        Icon(imageVector = Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
+                                    if (isProcessingRestore) {
+                                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    } else {
+                                        Icon(imageVector = Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
                                         Text(
-                                            text = if (language == "sw") "Shiriki / Nakili Faili" else "Share / Copy File",
-                                            fontSize = 12.sp,
+                                            text = if (language == "sw") "Restore from File" else "Restore from File",
+                                            fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
                             }
+
+                            // Saved Backup File Card
+                            if (lastSavedBackupName != null) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth().testTag("saved_backup_file_card")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.weight(1f),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.InsertDriveFile,
+                                                contentDescription = null,
+                                                tint = AmberPrimary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Column {
+                                                Text(
+                                                    text = lastSavedBackupName ?: "Backup.json",
+                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                    maxLines = 1
+                                                )
+                                                val timeStr = if (lastSavedBackupTime > 0L) {
+                                                    SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date(lastSavedBackupTime))
+                                                } else ""
+                                                Text(
+                                                    text = timeStr,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+
+                                        IconButton(
+                                            onClick = {
+                                                var targetFile = lastSavedLocalFile
+                                                if (targetFile == null || !targetFile.exists()) {
+                                                    val backupDir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir, "backups")
+                                                    if (!backupDir.exists()) backupDir.mkdirs()
+                                                    val f = File(backupDir, lastSavedBackupName ?: "AgritechHub_Backup.json")
+                                                    f.writeText(onExportBackup(), Charsets.UTF_8)
+                                                    targetFile = f
+                                                    lastSavedLocalFile = f
+                                                }
+                                                shareBackupFile(targetFile)
+                                            },
+                                            modifier = Modifier.size(32.dp).testTag("share_backup_file_btn")
+                                        ) {
+                                            Icon(imageVector = Icons.Default.Share, contentDescription = "Share", modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                }
+                            }
                         }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                    // Delete Demo Data Option
+                    var showDeleteDemoConfirmDialog by remember { mutableStateOf(false) }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (language == "sw") "Futa Data za Mfano (Demo Data)" else "Delete Demo Data",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                color = RoseError
+                            )
+                            Text(
+                                text = if (language == "sw")
+                                    "Ondoa data zote za mfano zilizokuja na mfumo (vifaa, wateja, makadirio). Hazitarejeshwa tena hata ukiingia upya au ukisawazisha (Sync)."
+                                else
+                                    "Permanently remove bundled sample materials, customers, and quotes. They will never be recreated, even after re-login or sync.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        OutlinedButton(
+                            onClick = { showDeleteDemoConfirmDialog = true },
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = RoseError),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, RoseError.copy(alpha = 0.5f)),
+                            modifier = Modifier.testTag("delete_demo_data_btn")
+                        ) {
+                            Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp), tint = RoseError)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(if (language == "sw") "Futa Mfano" else "Delete Demo", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = RoseError)
+                        }
+                    }
+
+                    if (showDeleteDemoConfirmDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showDeleteDemoConfirmDialog = false },
+                            icon = {
+                                Icon(Icons.Default.WarningAmber, contentDescription = null, tint = RoseError, modifier = Modifier.size(36.dp))
+                            },
+                            title = {
+                                Text(
+                                    text = if (language == "sw") "Futa Data za Mfano Kabisa?" else "Permanently Delete Demo Data?",
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
+                            text = {
+                                Text(
+                                    text = if (language == "sw")
+                                        "Je, una uhakika unataka kuondoa data zote za mfano zilizokuja na mfumo? Data zako halisi ulizoweka au kuingiza hazitaguswa, na data za mfano hazitarejeshwa tena hata ukifanya Sync."
+                                    else
+                                        "Are you sure you want to permanently delete all demo/sample records? Your real added or imported data will not be affected, and demo data will never be recreated or downloaded."
+                                )
+                            },
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        showDeleteDemoConfirmDialog = false
+                                        onDeleteDemoData?.invoke()
+                                        Toast.makeText(
+                                            context,
+                                            if (language == "sw") "Data za mfano zimefutwa kabisa!" else "Demo data permanently removed!",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = RoseError),
+                                    modifier = Modifier.testTag("confirm_delete_demo_btn")
+                                ) {
+                                    Text(if (language == "sw") "Ndio, Futa Kabisa" else "Yes, Delete Permanently", color = Color.White, fontWeight = FontWeight.Bold)
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(
+                                    onClick = { showDeleteDemoConfirmDialog = false },
+                                    modifier = Modifier.testTag("cancel_delete_demo_btn")
+                                ) {
+                                    Text(if (language == "sw") "Ghairi" else "Cancel")
+                                }
+                            }
+                        )
                     }
                 }
             }
         }
 
-        // 5b. Cloud Synchronization & Account Recovery
+        // 5b. User Account & Security
         item {
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().testTag("account_security_card")
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(
@@ -1154,11 +1279,11 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (language == "sw") "Akaunti & Hifadhi ya Wingu (Cloud)" else "Cloud Account & Recovery",
+                            text = if (language == "sw") "Akaunti & Usalama" else "Account & Security",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                         )
                         Icon(
-                            imageVector = Icons.Default.CloudSync,
+                            imageVector = Icons.Default.Security,
                             contentDescription = null,
                             tint = AmberPrimary
                         )
@@ -1190,59 +1315,51 @@ fun SettingsScreen(
                         }
                     }
 
-                    Text(
-                        text = if (lastSyncTime > 0) {
-                            val timeStr = java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(lastSyncTime))
-                            if (language == "sw") "Wingu lilisawazishwa: $timeStr" else "Last cloud sync: $timeStr"
-                        } else {
-                            if (language == "sw") "Mfumo unafanya kazi bila mtandao (Offline-First)." else "App works 100% offline-first."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    // Change Password & Logout Row / Buttons
+                    var showChangePasswordDialog by remember { mutableStateOf(false) }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Button(
-                            onClick = onSyncCloud,
-                            enabled = !isSyncing,
-                            modifier = Modifier.weight(1f).testTag("cloud_sync_now_btn"),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary, contentColor = Color.Black)
+                        OutlinedButton(
+                            onClick = { showChangePasswordDialog = true },
+                            modifier = Modifier.weight(1f).testTag("settings_change_password_btn"),
+                            shape = RoundedCornerShape(10.dp)
                         ) {
-                            if (isSyncing) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.Black, strokeWidth = 2.dp)
-                            } else {
-                                Icon(imageVector = Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(if (language == "sw") "Hifadhi Wingu" else "Cloud Sync", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
+                            Icon(imageVector = Icons.Default.LockReset, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (language == "sw") "Badili Nenosiri" else "Change Password",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
                         }
 
                         OutlinedButton(
-                            onClick = onRestoreCloud,
-                            enabled = !isSyncing,
-                            modifier = Modifier.weight(1f).testTag("cloud_restore_now_btn"),
-                            shape = RoundedCornerShape(10.dp)
+                            onClick = onLogout,
+                            modifier = Modifier.weight(1f).testTag("settings_logout_btn"),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = RoseError),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, RoseError.copy(alpha = 0.5f))
                         ) {
-                            Icon(imageVector = Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(imageVector = Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(16.dp), tint = RoseError)
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(if (language == "sw") "Rejesha Wingu" else "Cloud Restore", fontSize = 12.sp)
+                            Text(
+                                text = if (language == "sw") "Toka (Logout)" else "Logout",
+                                color = RoseError,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
 
-                    TextButton(
-                        onClick = onLogout,
-                        modifier = Modifier.align(Alignment.CenterHorizontally).testTag("settings_logout_btn")
-                    ) {
-                        Icon(imageVector = Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(16.dp), tint = RoseError)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (language == "sw") "Toka / Badili Akaunti (Logout)" else "Logout / Switch Account",
-                            color = RoseError,
-                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                    if (showChangePasswordDialog && onChangePassword != null) {
+                        ChangePasswordDialog(
+                            language = language,
+                            onChangePassword = onChangePassword,
+                            onDismiss = { showChangePasswordDialog = false }
                         )
                     }
                 }
@@ -1349,5 +1466,235 @@ fun SettingsScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun ChangePasswordDialog(
+    language: String,
+    onChangePassword: suspend (String, String) -> Pair<Boolean, String>,
+    onDismiss: () -> Unit
+) {
+    val coroutineScope = rememberCoroutineScope()
+    var currentPassword by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+
+    var showCurrentPassword by remember { mutableStateOf(false) }
+    var showNewPassword by remember { mutableStateOf(false) }
+    var showConfirmPassword by remember { mutableStateOf(false) }
+
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var successMessage by remember { mutableStateOf<String?>(null) }
+
+    Dialog(onDismissRequest = { if (!isLoading) onDismiss() }) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .padding(16.dp)
+                .imePadding(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.LockReset,
+                            contentDescription = null,
+                            tint = AmberPrimary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Text(
+                            text = if (language == "sw") "Badili Nenosiri" else "Change Password",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                    if (!isLoading) {
+                        IconButton(onClick = onDismiss) {
+                            Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
+                        }
+                    }
+                }
+
+                Text(
+                    text = if (language == "sw")
+                        "Weka nenosiri lako la sasa, kisha weka nenosiri jipya. Nenosiri jipya litahifadhiwa kwenye akaunti yako."
+                    else
+                        "Enter your current password and create a new secure password.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                if (successMessage != null) {
+                    Surface(
+                        color = EmeraldSuccess.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, tint = EmeraldSuccess)
+                            Text(
+                                text = successMessage ?: "",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                color = EmeraldSuccess
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Button(
+                        onClick = onDismiss,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess)
+                    ) {
+                        Text(if (language == "sw") "Sawa / Funga" else "Done", fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    // Current Password
+                    OutlinedTextField(
+                        value = currentPassword,
+                        onValueChange = { currentPassword = it },
+                        label = { Text(if (language == "sw") "Nenosiri la Sasa" else "Current Password") },
+                        visualTransformation = if (showCurrentPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { showCurrentPassword = !showCurrentPassword }) {
+                                Icon(
+                                    imageVector = if (showCurrentPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = null
+                                )
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        modifier = Modifier.fillMaxWidth().testTag("change_password_current_input"),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    // New Password
+                    OutlinedTextField(
+                        value = newPassword,
+                        onValueChange = { newPassword = it },
+                        label = { Text(if (language == "sw") "Nenosiri Jipya" else "New Password") },
+                        visualTransformation = if (showNewPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { showNewPassword = !showNewPassword }) {
+                                Icon(
+                                    imageVector = if (showNewPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = null
+                                )
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        modifier = Modifier.fillMaxWidth().testTag("change_password_new_input"),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    // Confirm New Password
+                    OutlinedTextField(
+                        value = confirmPassword,
+                        onValueChange = { confirmPassword = it },
+                        label = { Text(if (language == "sw") "Thibitisha Nenosiri Jipya" else "Confirm New Password") },
+                        visualTransformation = if (showConfirmPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { showConfirmPassword = !showConfirmPassword }) {
+                                Icon(
+                                    imageVector = if (showConfirmPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = null
+                                )
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        modifier = Modifier.fillMaxWidth().testTag("change_password_confirm_input"),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    if (errorMessage != null) {
+                        Text(
+                            text = errorMessage ?: "",
+                            color = RoseError,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onDismiss,
+                            enabled = !isLoading,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(AppStrings.t("btn_cancel", language))
+                        }
+
+                        Button(
+                            onClick = {
+                                if (currentPassword.isBlank()) {
+                                    errorMessage = if (language == "sw") "Tafadhali ingiza nenosiri la sasa." else "Please enter current password."
+                                    return@Button
+                                }
+                                if (newPassword.length < 6) {
+                                    errorMessage = if (language == "sw") "Nenosiri jipya liwe na herufi zisizopungua 6." else "New password must be at least 6 characters."
+                                    return@Button
+                                }
+                                if (newPassword != confirmPassword) {
+                                    errorMessage = if (language == "sw") "Manenosiri mapya hayalingani." else "New passwords do not match."
+                                    return@Button
+                                }
+
+                                isLoading = true
+                                errorMessage = null
+
+                                coroutineScope.launch {
+                                    val (success, msg) = onChangePassword(currentPassword, newPassword)
+                                    isLoading = false
+                                    if (success) {
+                                        successMessage = msg
+                                    } else {
+                                        errorMessage = msg
+                                    }
+                                }
+                            },
+                            enabled = !isLoading,
+                            modifier = Modifier.weight(1.3f).testTag("submit_change_password_btn"),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary, contentColor = Color.Black)
+                        ) {
+                            if (isLoading) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.Black, strokeWidth = 2.dp)
+                            } else {
+                                Text(if (language == "sw") "Badili Nenosiri" else "Update Password", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

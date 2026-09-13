@@ -322,10 +322,11 @@ fun ActivationDialog(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 val plans = listOf(
-                    Triple("Mwezi 1 (Monthly)", "TSh 5,000", "Siku 30"),
-                    Triple("Miezi 3 (Quarterly)", "TSh 12,000", "Siku 90"),
-                    Triple("Mwaka 1 (Yearly)", "TSh 30,000", "Siku 365 (Maarufu)"),
-                    Triple("Maisha Yote (Lifetime)", "TSh 60,000", "Bila Kikomo cha Muda")
+                    Triple(if (language == "sw") "Mwezi 1 (Monthly)" else "1 Month (Monthly)", "TZS 5,000", if (language == "sw") "Siku 30" else "30 Days"),
+                    Triple(if (language == "sw") "Miezi 3 (Quarterly)" else "3 Months (Quarterly)", "TZS 12,000", if (language == "sw") "Siku 90" else "90 Days"),
+                    Triple(if (language == "sw") "Miezi 6 (6 Months)" else "6 Months", "TZS 24,000", if (language == "sw") "Siku 180" else "180 Days"),
+                    Triple(if (language == "sw") "Mwaka 1 (Yearly)" else "1 Year (Yearly)", "TZS 40,000", if (language == "sw") "Siku 365" else "365 Days"),
+                    Triple(if (language == "sw") "Maisha Yote (Lifetime)" else "Lifetime (No Expiry)", "TZS 60,000", if (language == "sw") "Bila Kikomo cha Muda" else "Lifetime (No Expiry)")
                 )
 
                 plans.forEach { (name, price, desc) ->
