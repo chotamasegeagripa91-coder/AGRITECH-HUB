@@ -426,8 +426,13 @@ object PdfExporter {
 
         // Clean file name
         val cleanNumber = quote.number.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-        val cleanCustomer = quote.customerName.replace(Regex("[^a-zA-Z0-9]"), "_").take(12)
-        val fileName = "AGRITECH_${cleanNumber}_$cleanCustomer.pdf"
+        val cleanCustomer = quote.customerName.ifBlank { "Mteja" }.replace(Regex("[^a-zA-Z0-9]"), "_")
+        val prefix = if (isInvoice) {
+            if (isSw) "Ankara" else "Invoice"
+        } else {
+            if (isSw) "Makadirio" else "Quotation"
+        }
+        val fileName = "${cleanCustomer}_${prefix}_${cleanNumber}.pdf"
 
         var outputFile: File? = null
         try {

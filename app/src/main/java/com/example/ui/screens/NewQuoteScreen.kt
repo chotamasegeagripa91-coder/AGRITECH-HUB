@@ -872,9 +872,13 @@ fun MaterialPickerDialog(
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = mat.name,
-                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                            style = MaterialTheme.typography.bodyLarge.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 17.sp,
+                                                lineHeight = 21.sp
+                                            )
                                         )
-                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Spacer(modifier = Modifier.height(3.dp))
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Surface(
                                                 color = categoryColor.copy(alpha = 0.15f),
@@ -883,7 +887,7 @@ fun MaterialPickerDialog(
                                                 Text(
                                                     text = canonicalCategory,
                                                     color = categoryColor,
-                                                    fontSize = 10.sp,
+                                                    fontSize = 12.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                                 )
@@ -891,15 +895,16 @@ fun MaterialPickerDialog(
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Text(
                                                 text = "• ${mat.unit}",
-                                                style = MaterialTheme.typography.bodySmall,
+                                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
                                     }
                                     Text(
                                         text = Formatters.formatCurrency(mat.price),
-                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                        style = MaterialTheme.typography.titleMedium.copy(
                                             fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp,
                                             color = MaterialTheme.colorScheme.primary
                                         )
                                     )

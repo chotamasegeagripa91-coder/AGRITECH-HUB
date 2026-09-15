@@ -48,6 +48,8 @@ import androidx.compose.ui.platform.LocalAutofill
 import androidx.compose.ui.platform.LocalAutofillTree
 import com.example.R
 import com.example.data.cloud.AgritechCloudService
+import com.example.ui.utils.BiometricHelper
+import androidx.fragment.app.FragmentActivity
 import com.example.data.cloud.FirebaseAuthManager
 import com.example.data.local.AppPreferences
 import com.example.data.models.UserAccount
@@ -461,10 +463,20 @@ fun AuthScreen(
                 }
             } else {
                 isProcessing = false
-                registerError = authResult.errorMessage ?: if (language == "sw")
+                val err = authResult.errorMessage ?: if (language == "sw")
                     "Intaneti inahitajika ili kuunda akaunti mpya na kuunganisha taarifa zako kwenye wingu (Firebase). Tafadhali washa data au Wi-Fi kisha ujaribu tena."
                 else
                     "An active internet connection is required to create a new account and link your data to Firebase. Please connect to internet and try again."
+                registerError = err
+                if (err.contains("tayari ipo", ignoreCase = true) ||
+                    err.contains("already exists", ignoreCase = true) ||
+                    err.contains("already in use", ignoreCase = true)
+                ) {
+                    loginEmail = cleanEmail
+                    if (cleanPwd.isNotBlank()) {
+                        loginPassword = cleanPwd
+                    }
+                }
             }
         }
     }
@@ -506,35 +518,37 @@ fun AuthScreen(
                 .padding(horizontal = 24.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top Bar: Language Selector (Pill Style, Top-Right)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Surface(
-                    onClick = onToggleLanguage,
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
-                    border = BorderStroke(1.dp, AmberPrimary.copy(alpha = 0.4f)),
-                    modifier = Modifier.testTag("auth_lang_toggle_btn")
+            // Top Bar: Language Selector (Pill Style, Top-Right - Login Screen Only)
+            if (currentTab == AuthTab.LOGIN) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    Surface(
+                        onClick = onToggleLanguage,
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
+                        border = BorderStroke(1.dp, AmberPrimary.copy(alpha = 0.4f)),
+                        modifier = Modifier.testTag("auth_lang_toggle_btn")
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Language,
-                            contentDescription = "Language",
-                            tint = AmberPrimary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = if (language == "sw") "Kiswahili" else "English",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Language,
+                                contentDescription = "Language",
+                                tint = AmberPrimary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = if (language == "sw") "Kiswahili" else "English",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                 }
             }
@@ -615,22 +629,91 @@ fun AuthScreen(
                                     .fillMaxWidth()
                                     .padding(bottom = 14.dp)
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                Column(
+                                    modifier = Modifier.padding(12.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.ErrorOutline,
-                                        contentDescription = null,
-                                        tint = RoseError,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        text = loginError ?: "",
-                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                                        color = RoseError
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.Top
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ErrorOutline,
+                                            contentDescription = null,
+                                            tint = RoseError,
+                                            modifier = Modifier
+                                                .size(20.dp)
+                                                .padding(top = 2.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = loginError ?: "",
+                                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                            color = RoseError,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+
+                                    val isCredentialOrPasswordIssue = loginError?.let { err ->
+                                        err.contains("nenosiri", ignoreCase = true) ||
+                                                err.contains("password", ignoreCase = true) ||
+                                                err.contains("credential", ignoreCase = true) ||
+                                                err.contains("Google", ignoreCase = true)
+                                    } == true
+
+                                    if (isCredentialOrPasswordIssue) {
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            // Quick Reset Password button
+                                            Button(
+                                                onClick = {
+                                                    forgotEmail = loginEmail.trim()
+                                                    forgotError = null
+                                                    forgotSuccess = null
+                                                    showForgotDialog = true
+                                                },
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = AmberPrimary,
+                                                    contentColor = Color.Black
+                                                ),
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.LockReset,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = if (language == "sw") "Weka Nenosiri" else "Reset Password",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                                                )
+                                            }
+
+                                            // Quick Continue with Google button
+                                            OutlinedButton(
+                                                onClick = { performGoogleSignIn() },
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Icon(
+                                                    painter = painterResource(id = R.drawable.ic_google_logo),
+                                                    contentDescription = null,
+                                                    tint = Color.Unspecified,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = "Google",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -661,6 +744,90 @@ fun AuthScreen(
                                         style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
                                         color = EmeraldSuccess
                                     )
+                                }
+                            }
+                        }
+
+                        // Sehemu ya Kuchagua Lugha (Login Screen Only)
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            border = BorderStroke(1.dp, AmberPrimary.copy(alpha = 0.25f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 16.dp)
+                                .testTag("login_language_selector_card")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Language,
+                                        contentDescription = "Language",
+                                        tint = AmberPrimary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Text(
+                                        text = if (language == "sw") "Lugha:" else "Language:",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    // Kiswahili
+                                    Surface(
+                                        onClick = {
+                                            if (language != "sw") onToggleLanguage()
+                                        },
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = if (language == "sw") AmberPrimary else MaterialTheme.colorScheme.surface,
+                                        border = BorderStroke(
+                                            1.dp,
+                                            if (language == "sw") AmberPrimary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                                        ),
+                                        modifier = Modifier.testTag("login_lang_sw_btn")
+                                    ) {
+                                        Text(
+                                            text = "Kiswahili",
+                                            style = MaterialTheme.typography.labelMedium.copy(
+                                                fontWeight = if (language == "sw") FontWeight.Bold else FontWeight.Medium
+                                            ),
+                                            color = if (language == "sw") Color.White else MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                        )
+                                    }
+                                    // English
+                                    Surface(
+                                        onClick = {
+                                            if (language != "en") onToggleLanguage()
+                                        },
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = if (language == "en") AmberPrimary else MaterialTheme.colorScheme.surface,
+                                        border = BorderStroke(
+                                            1.dp,
+                                            if (language == "en") AmberPrimary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                                        ),
+                                        modifier = Modifier.testTag("login_lang_en_btn")
+                                    ) {
+                                        Text(
+                                            text = "English",
+                                            style = MaterialTheme.typography.labelMedium.copy(
+                                                fontWeight = if (language == "en") FontWeight.Bold else FontWeight.Medium
+                                            ),
+                                            color = if (language == "en") Color.White else MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -915,6 +1082,145 @@ fun AuthScreen(
                             }
                         }
 
+                        // 6.5. Small Biometric Login Option (Only if hardware is supported)
+                        val isBiometricHardwareSupported = remember { BiometricHelper.isHardwareSupported(context) }
+                        val isBiometricEnrolled = remember { BiometricHelper.hasBiometricsEnrolled(context) }
+                        val hasBiometricSetup = remember { prefs.hasBiometricCredentials() }
+
+                        if (isBiometricHardwareSupported) {
+                            Spacer(modifier = Modifier.height(14.dp))
+                            TextButton(
+                                onClick = {
+                                    val biometricActivity = context as? FragmentActivity
+                                    if (biometricActivity != null) {
+                                        if (!isBiometricEnrolled) {
+                                            loginError = if (language == "sw") {
+                                                "Tafadhali weka alama ya kidole kwenye mipangilio ya simu yako kwanza."
+                                            } else {
+                                                "Please set up fingerprint/biometric authentication in your phone's system settings first."
+                                            }
+                                            return@TextButton
+                                        }
+                                        
+                                        if (!hasBiometricSetup) {
+                                            loginError = if (language == "sw") {
+                                                "Hakuna akaunti iliyohifadhiwa. Tafadhali ingia mara moja kwanza kwa barua pepe au Google ili kuwezesha alama ya kidole."
+                                            } else {
+                                                "No saved account found. Please login normally once with Email/Password or Google to enable biometric login."
+                                            }
+                                            return@TextButton
+                                        }
+
+                                        val title = if (language == "sw") "Ingia kwa Alama ya Kidole" else "Biometric Login"
+                                        val subtitle = if (language == "sw") "Gusa sensor ya alama ya kidole kuingia kwenye akaunti yako" else "Touch the fingerprint sensor to access your account"
+                                        val negativeBtnText = if (language == "sw") "Ghairi" else "Cancel"
+                                        
+                                        BiometricHelper.showBiometricPrompt(
+                                            activity = biometricActivity,
+                                            title = title,
+                                            subtitle = subtitle,
+                                            negativeButtonText = negativeBtnText,
+                                            onSuccess = {
+                                                val bType = prefs.getBiometricAuthType()
+                                                val bEmail = prefs.getBiometricEmail() ?: ""
+                                                val bSecret = prefs.getBiometricSecret() ?: ""
+                                                val bDisplayName = prefs.getBiometricDisplayName()
+                                                
+                                                isProcessing = true
+                                                loginError = null
+                                                loginSuccess = null
+                                                
+                                                if (bType == "google") {
+                                                    isGoogleProcessing = true
+                                                    val googleLoginHandler = onLoginWithGoogle
+                                                    if (googleLoginHandler != null) {
+                                                        googleLoginHandler(bEmail, bDisplayName, bSecret) { res, restored ->
+                                                            isProcessing = false
+                                                            isGoogleProcessing = false
+                                                            if (!res.success) {
+                                                                loginError = res.message
+                                                            } else if (restored) {
+                                                                showRestoreNotice = true
+                                                            }
+                                                        }
+                                                    } else {
+                                                        isProcessing = false
+                                                        isGoogleProcessing = false
+                                                        loginError = "Google Sign-In is not supported."
+                                                    }
+                                                } else {
+                                                    FirebaseAuthManager.signInWithEmail(
+                                                        email = bEmail,
+                                                        password = bSecret,
+                                                        language = language
+                                                    ) { authResult ->
+                                                        if (authResult.success) {
+                                                            val uid = authResult.uid ?: ""
+                                                            val firebaseLoginHandler = onLoginWithFirebase
+                                                            if (firebaseLoginHandler != null) {
+                                                                firebaseLoginHandler(bEmail, bSecret, uid) { res, restored ->
+                                                                    isProcessing = false
+                                                                    if (!res.success) {
+                                                                        loginError = res.message
+                                                                    } else if (restored) {
+                                                                        showRestoreNotice = true
+                                                                    }
+                                                                }
+                                                            } else {
+                                                                onLogin(bEmail, bSecret) { res, restored ->
+                                                                    isProcessing = false
+                                                                    if (!res.success) {
+                                                                        loginError = res.message
+                                                                    } else if (restored) {
+                                                                        showRestoreNotice = true
+                                                                    }
+                                                                }
+                                                            }
+                                                        } else {
+                                                            onLogin(bEmail, bSecret) { localRes, restored ->
+                                                                isProcessing = false
+                                                                if (localRes.success) {
+                                                                    if (restored) {
+                                                                        showRestoreNotice = true
+                                                                    }
+                                                                } else {
+                                                                    loginError = authResult.errorMessage ?: localRes.message
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            onError = { err ->
+                                                loginError = err
+                                            }
+                                        )
+                                    }
+                                },
+                                modifier = Modifier
+                                    .align(Alignment.CenterHorizontally)
+                                    .testTag("biometric_login_btn"),
+                                colors = ButtonDefaults.textButtonColors(
+                                    contentColor = AmberPrimary
+                                )
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Fingerprint,
+                                        contentDescription = "Fingerprint",
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Text(
+                                        text = if (language == "sw") "Ingia kwa Alama ya Kidole" else "Login with Fingerprint",
+                                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                            }
+                        }
+
                         Spacer(modifier = Modifier.height(18.dp))
 
                         // 7. Bottom Navigation Text: Switch to Sign Up
@@ -963,22 +1269,98 @@ fun AuthScreen(
                                     .fillMaxWidth()
                                     .padding(bottom = 14.dp)
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                Column(
+                                    modifier = Modifier.padding(12.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.ErrorOutline,
-                                        contentDescription = null,
-                                        tint = RoseError,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        text = registerError ?: "",
-                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                                        color = RoseError
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.Top
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ErrorOutline,
+                                            contentDescription = null,
+                                            tint = RoseError,
+                                            modifier = Modifier
+                                                .size(20.dp)
+                                                .padding(top = 2.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = registerError ?: "",
+                                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                            color = RoseError,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+
+                                    val isAlreadyExists = registerError?.let { err ->
+                                        err.contains("tayari ipo", ignoreCase = true) ||
+                                                err.contains("already exists", ignoreCase = true) ||
+                                                err.contains("already in use", ignoreCase = true) ||
+                                                err.contains("chagua Kuingia", ignoreCase = true) ||
+                                                err.contains("choose Login", ignoreCase = true)
+                                    } == true
+
+                                    if (isAlreadyExists) {
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            // Direct switch to Login with email transferred
+                                            Button(
+                                                onClick = {
+                                                    loginEmail = regEmail.trim()
+                                                    if (regPassword.isNotBlank()) {
+                                                        loginPassword = regPassword.trim()
+                                                    }
+                                                    currentTab = AuthTab.LOGIN
+                                                    clearErrors()
+                                                },
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = AmberPrimary,
+                                                    contentColor = Color.Black
+                                                ),
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Login,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = if (language == "sw") "Ingia Sasa" else "Log In Now",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                                                )
+                                            }
+
+                                            // Quick Reset Password action
+                                            OutlinedButton(
+                                                onClick = {
+                                                    forgotEmail = regEmail.trim()
+                                                    forgotError = null
+                                                    forgotSuccess = null
+                                                    showForgotDialog = true
+                                                },
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.LockReset,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = if (language == "sw") "Weka Nenosiri" else "Reset Password",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

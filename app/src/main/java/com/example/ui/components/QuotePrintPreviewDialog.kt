@@ -118,7 +118,7 @@ fun QuotePrintPreviewDialog(
                     .fillMaxSize()
                     .padding(14.dp)
             ) {
-                // Header action bar
+                // Header action bar (Title + Close Button)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -126,48 +126,61 @@ fun QuotePrintPreviewDialog(
                 ) {
                     Text(
                         text = if (isInvoice) (if (language == "sw") "Ankara Rasmi (Print / PDF)" else "Official Invoice (Print / PDF)") else (if (language == "sw") "Makadirio Rasmi (Print / PDF)" else "Official Quotation (Print / PDF)"),
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        modifier = Modifier.weight(1f)
                     )
+                    IconButton(onClick = onDismiss) {
+                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Button(
-                            onClick = {
-                                val file = PdfExporter.generateAndSavePdf(
-                                    context = context,
-                                    quote = quote,
-                                    items = items,
-                                    businessSettings = businessSettings,
-                                    language = language
-                                )
-                                if (file != null) {
-                                    Toast.makeText(context, if (language == "sw") "PDF imepakuliwa!" else "PDF downloaded!", Toast.LENGTH_SHORT).show()
-                                    PdfExporter.openOrSharePdf(context, file, if (isInvoice) "Ankara" else "Makadirio")
-                                } else {
-                                    Toast.makeText(context, if (language == "sw") "Imeshindikana kutengeneza PDF." else "Failed to generate PDF.", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary, contentColor = Color.Black),
-                            modifier = Modifier.testTag("download_pdf_preview_btn")
-                        ) {
-                            Icon(imageVector = Icons.Default.Download, contentDescription = "Download PDF", modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(if (language == "sw") "Pakua PDF" else "Download PDF", fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                        }
+                Spacer(modifier = Modifier.height(8.dp))
 
-                        OutlinedButton(
-                            onClick = { printDocument() },
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.testTag("execute_print_btn")
-                        ) {
-                            Icon(imageVector = Icons.Default.Print, contentDescription = "Print", modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Print", fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                        }
+                // Action Buttons Row (Download PDF and Print)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = {
+                            val file = PdfExporter.generateAndSavePdf(
+                                context = context,
+                                quote = quote,
+                                items = items,
+                                businessSettings = businessSettings,
+                                language = language
+                            )
+                            if (file != null) {
+                                Toast.makeText(context, if (language == "sw") "PDF imepakuliwa!" else "PDF downloaded!", Toast.LENGTH_SHORT).show()
+                                PdfExporter.openOrSharePdf(context, file, if (isInvoice) "Ankara" else "Makadirio")
+                            } else {
+                                Toast.makeText(context, if (language == "sw") "Imeshindikana kutengeneza PDF." else "Failed to generate PDF.", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary, contentColor = Color.Black),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                        modifier = Modifier
+                            .height(38.dp)
+                            .testTag("download_pdf_preview_btn")
+                    ) {
+                        Icon(imageVector = Icons.Default.Download, contentDescription = "Download PDF", modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(if (language == "sw") "Pakua PDF" else "Download PDF", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
 
-                        IconButton(onClick = onDismiss) {
-                            Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
-                        }
+                    OutlinedButton(
+                        onClick = { printDocument() },
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                        modifier = Modifier
+                            .height(38.dp)
+                            .testTag("execute_print_btn")
+                    ) {
+                        Icon(imageVector = Icons.Default.Print, contentDescription = "Print", modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Print", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
 

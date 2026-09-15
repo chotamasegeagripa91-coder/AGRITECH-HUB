@@ -23,7 +23,7 @@ import com.example.ui.viewmodel.AgritechViewModel
 import com.example.ui.viewmodel.AgritechViewModelFactory
 import com.example.ui.viewmodel.AppScreen
 
-class MainActivity : ComponentActivity() {
+class MainActivity : androidx.fragment.app.FragmentActivity() {
     private var mainViewModel: AgritechViewModel? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,60 +61,43 @@ class MainActivity : ComponentActivity() {
             val customers by viewModel.customers.collectAsStateWithLifecycle()
             val quotes by viewModel.quotes.collectAsStateWithLifecycle()
 
-            // Dialog states
-            var editingMaterial by remember { mutableStateOf<MaterialEntity?>(null) }
-            var isAddingMaterial by remember { mutableStateOf(false) }
-
-            var editingCustomer by remember { mutableStateOf<CustomerEntity?>(null) }
-            var isAddingCustomer by remember { mutableStateOf(false) }
-
-            var selectedQuoteForDetails by remember { mutableStateOf<QuoteEntity?>(null) }
-            var selectedQuoteForPrint by remember { mutableStateOf<QuoteEntity?>(null) }
-
             var showActivationDialog by remember { mutableStateOf(false) }
-
-            var preselectedCustomerForNewQuote by remember { mutableStateOf<CustomerEntity?>(null) }
+            var editingMaterial by remember { mutableStateOf<MaterialEntity?>(null) }
+            var showAddMaterialDialog by remember { mutableStateOf(false) }
+            var editingCustomer by remember { mutableStateOf<CustomerEntity?>(null) }
+            var showAddCustomerDialog by remember { mutableStateOf(false) }
+            var selectedQuoteForDetails by remember { mutableStateOf<QuoteEntity?>(null) }
+            var selectedQuoteForPreview by remember { mutableStateOf<QuoteEntity?>(null) }
+            var preselectedCustomerForQuote by remember { mutableStateOf<CustomerEntity?>(null) }
 
             AgritechHubTheme(darkTheme = isDarkMode) {
                 if (!isUserRegistered) {
                     AuthScreen(
                         language = language,
                         onToggleLanguage = { viewModel.toggleLanguage() },
-                        onRegisterDirectly = { bName, oName, ph, em, pwd, uid ->
-                            viewModel.registerUserDirectly(bName, oName, ph, em, pwd, uid)
-                        },
                         onRegister = { bName, oName, ph, em, pwd ->
                             viewModel.registerUser(bName, oName, ph, em, pwd)
                         },
+                        onRegisterDirectly = { bName, oName, ph, em, pwd, firebaseUid ->
+                            viewModel.registerUserDirectly(bName, oName, ph, em, pwd, firebaseUid)
+                        },
                         onLogin = { emOrPhone, pwd, onResult ->
-                            viewModel.loginUser(emOrPhone, pwd, autoRestoreCloudData = true, onComplete = onResult)
+                            viewModel.loginUser(emOrPhone, pwd, onComplete = onResult)
                         },
                         onLoginWithFirebase = { em, pwd, uid, onResult ->
-                            viewModel.loginUser(em, pwd, autoRestoreCloudData = true, firebaseUid = uid, onComplete = onResult)
+                            viewModel.loginUser(em, pwd, firebaseUid = uid, onComplete = onResult)
                         },
-                        onLoginWithGoogle = { em, dName, uid, onResult ->
-                            viewModel.loginWithGoogle(
-                                firebaseUid = uid,
-                                email = em,
-                                displayName = dName,
-                                autoRestoreCloudData = true,
-                                onComplete = onResult
-                            )
+                        onLoginWithGoogle = { email, displayName, uid, onResult ->
+                            viewModel.loginWithGoogle(firebaseUid = uid, email = email, displayName = displayName, onComplete = onResult)
                         },
-                        onVerifyOtp = { emOrPhone, otp ->
-                            viewModel.verifyRegistrationOtp(emOrPhone, otp)
+                        onRequestForgotOtp = { emailOrPhone ->
+                            viewModel.requestForgotPasswordOtp(emailOrPhone)
                         },
-                        onCompleteFirebaseVerifiedRegistration = { emOrPhone, uid ->
-                            viewModel.completeFirebaseVerifiedRegistration(emOrPhone, uid)
+                        onResetPasswordOtp = { emailOrPhone, otpCode, newPassword ->
+                            viewModel.resetPasswordWithOtp(emailOrPhone, otpCode, newPassword)
                         },
-                        onRequestForgotOtp = { id ->
-                            viewModel.requestForgotPasswordOtp(id)
-                        },
-                        onResetPasswordOtp = { id, otp, newPwd ->
-                            viewModel.resetPasswordWithOtp(id, otp, newPwd)
-                        },
-                        onResendOtp = { id ->
-                            viewModel.resendOtp(id)
+                        onResendOtp = { emailOrPhone ->
+                            viewModel.resendOtp(emailOrPhone)
                         }
                     )
                 } else if (isLocked) {
@@ -124,7 +107,14 @@ class MainActivity : ComponentActivity() {
                         isPasswordConfigured = isPasswordConfigured,
                         onToggleLanguage = { viewModel.toggleLanguage() },
                         onCreatePassword = { password -> viewModel.createInitialPassword(password) },
-                        onUnlock = { password -> viewModel.unlockApp(password) },
+                        onUnlock = { password -> 
+                            if (password.isEmpty()) {
+                                viewModel.unlockWithBiometric()
+                                true
+                            } else {
+                                viewModel.unlockApp(password)
+                            }
+                        },
                         onSwitchAccount = { viewModel.logoutUser() }
                     )
                 } else {
@@ -181,14 +171,8 @@ class MainActivity : ComponentActivity() {
                                     MaterialsScreen(
                                         materials = materials,
                                         language = language,
-                                        onAddMaterial = {
-                                            editingMaterial = null
-                                            isAddingMaterial = true
-                                        },
-                                        onEditMaterial = { mat ->
-                                            editingMaterial = mat
-                                            isAddingMaterial = false
-                                        },
+                                        onAddMaterial = { showAddMaterialDialog = true },
+                                        onEditMaterial = { mat -> editingMaterial = mat },
                                         onDeleteMaterial = { mat -> viewModel.deleteMaterial(mat) },
                                         onDeleteAllMaterials = { viewModel.deleteAllMaterials() },
                                         onDeleteMaterialsByCategory = { cat -> viewModel.deleteMaterialsByCategory(cat) },
@@ -201,17 +185,11 @@ class MainActivity : ComponentActivity() {
                                         customers = customers,
                                         quotes = quotes,
                                         language = language,
-                                        onAddCustomer = {
-                                            editingCustomer = null
-                                            isAddingCustomer = true
-                                        },
-                                        onEditCustomer = { cust ->
-                                            editingCustomer = cust
-                                            isAddingCustomer = false
-                                        },
+                                        onAddCustomer = { showAddCustomerDialog = true },
+                                        onEditCustomer = { cust -> editingCustomer = cust },
                                         onDeleteCustomer = { cust -> viewModel.deleteCustomer(cust) },
                                         onNewQuoteForCustomer = { cust ->
-                                            preselectedCustomerForNewQuote = cust
+                                            preselectedCustomerForQuote = cust
                                             viewModel.navigateTo(AppScreen.NEW_QUOTE)
                                         }
                                     )
@@ -221,12 +199,12 @@ class MainActivity : ComponentActivity() {
                                     NewQuoteScreen(
                                         customers = customers,
                                         materials = materials,
-                                        preselectedCustomer = preselectedCustomerForNewQuote,
+                                        preselectedCustomer = preselectedCustomerForQuote,
                                         initialQuoteNumber = viewModel.getNextQuoteNumber(),
                                         language = language,
-                                        onSaveQuote = { newQuote ->
-                                            viewModel.insertQuote(newQuote)
-                                            preselectedCustomerForNewQuote = null
+                                        onSaveQuote = { quote ->
+                                            viewModel.insertQuote(quote)
+                                            preselectedCustomerForQuote = null
                                             viewModel.navigateTo(AppScreen.QUOTES_HISTORY)
                                         },
                                         onAddCustomer = { newCust -> viewModel.insertCustomer(newCust) }
@@ -238,10 +216,7 @@ class MainActivity : ComponentActivity() {
                                         quotes = quotes,
                                         language = language,
                                         onSelectQuote = { quote -> selectedQuoteForDetails = quote },
-                                        onNewQuote = {
-                                            preselectedCustomerForNewQuote = null
-                                            viewModel.navigateTo(AppScreen.NEW_QUOTE)
-                                        }
+                                        onNewQuote = { viewModel.navigateTo(AppScreen.NEW_QUOTE) }
                                     )
                                 }
 
@@ -253,7 +228,7 @@ class MainActivity : ComponentActivity() {
                                         isDarkMode = isDarkMode,
                                         language = language,
                                         autoLockEnabled = autoLockEnabled,
-                                        onSaveBusinessSettings = { settings -> viewModel.updateBusinessSettings(settings) },
+                                        onSaveBusinessSettings = { newSettings -> viewModel.updateBusinessSettings(newSettings) },
                                         onToggleAutoLock = { enabled -> viewModel.setAutoLockEnabled(enabled) },
                                         onToggleDarkMode = { viewModel.toggleDarkMode() },
                                         onToggleLanguage = { viewModel.toggleLanguage() },
@@ -266,7 +241,7 @@ class MainActivity : ComponentActivity() {
                                         onSyncCloud = { viewModel.syncDataToCloud() },
                                         onRestoreCloud = { viewModel.restoreDataFromCloud() },
                                         onDeleteDemoData = { viewModel.deleteDemoData() },
-                                        onChangePassword = { oldPass, newPass -> viewModel.changePassword(oldPass, newPass) },
+                                        onChangePassword = { old, new -> viewModel.changePassword(old, new) },
                                         onLogout = { viewModel.logoutUser() }
                                     )
                                 }
@@ -274,56 +249,74 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // Material Edit / Add Dialog
-                    if (isAddingMaterial || editingMaterial != null) {
+                    // Dialogs
+                    if (showActivationDialog) {
+                        ActivationDialog(
+                            licenseInfo = licenseInfo,
+                            installationId = installationId,
+                            language = language,
+                            onDismiss = { showActivationDialog = false },
+                            onActivate = { key, customerName ->
+                                viewModel.activateLicense(key, customerName)
+                            }
+                        )
+                    }
+
+                    if (showAddMaterialDialog || editingMaterial != null) {
                         MaterialEditDialog(
                             material = editingMaterial,
                             language = language,
                             availableCategories = materials.map { it.category }.distinct(),
                             onDismiss = {
-                                isAddingMaterial = false
+                                showAddMaterialDialog = false
                                 editingMaterial = null
                             },
                             onSave = { mat ->
-                                if (mat.id == 0) viewModel.insertMaterial(mat)
-                                else viewModel.updateMaterial(mat)
-                                isAddingMaterial = false
+                                if (editingMaterial != null) {
+                                    viewModel.updateMaterial(mat)
+                                } else {
+                                    viewModel.insertMaterial(mat)
+                                }
+                                showAddMaterialDialog = false
                                 editingMaterial = null
                             }
                         )
                     }
 
-                    // Customer Edit / Add Dialog
-                    if (isAddingCustomer || editingCustomer != null) {
+                    if (showAddCustomerDialog || editingCustomer != null) {
                         CustomerEditDialog(
                             customer = editingCustomer,
                             language = language,
                             onDismiss = {
-                                isAddingCustomer = false
+                                showAddCustomerDialog = false
                                 editingCustomer = null
                             },
                             onSave = { cust ->
-                                if (cust.id == 0) viewModel.insertCustomer(cust)
-                                else viewModel.updateCustomer(cust)
-                                isAddingCustomer = false
+                                if (editingCustomer != null) {
+                                    viewModel.updateCustomer(cust)
+                                } else {
+                                    viewModel.insertCustomer(cust)
+                                }
+                                showAddCustomerDialog = false
                                 editingCustomer = null
                             }
                         )
                     }
 
-                    // Quote Details Dialog
                     if (selectedQuoteForDetails != null) {
-                        val currentQ = quotes.find { it.id == selectedQuoteForDetails!!.id } ?: selectedQuoteForDetails!!
                         QuoteDetailsDialog(
-                            quote = currentQ,
+                            quote = selectedQuoteForDetails!!,
                             businessSettings = businessSettings,
                             language = language,
                             onDismiss = { selectedQuoteForDetails = null },
-                            onConvertToInvoice = { id, _ -> viewModel.convertToInvoice(id, viewModel.getNextInvoiceNumber()) },
-                            onSetPaidStatus = { id, paid -> viewModel.setQuotePaidStatus(id, paid) },
+                            onConvertToInvoice = { id, newNum ->
+                                viewModel.convertToInvoice(id, newNum)
+                            },
+                            onSetPaidStatus = { id, paid ->
+                                viewModel.setQuotePaidStatus(id, paid)
+                            },
                             onOpenPrintPreview = { quote ->
-                                selectedQuoteForDetails = null
-                                selectedQuoteForPrint = quote
+                                selectedQuoteForPreview = quote
                             },
                             onDelete = { quote ->
                                 viewModel.deleteQuote(quote)
@@ -332,24 +325,12 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
-                    // Print / PDF Preview Dialog
-                    if (selectedQuoteForPrint != null) {
+                    if (selectedQuoteForPreview != null) {
                         QuotePrintPreviewDialog(
-                            quote = selectedQuoteForPrint!!,
+                            quote = selectedQuoteForPreview!!,
                             businessSettings = businessSettings,
                             language = language,
-                            onDismiss = { selectedQuoteForPrint = null }
-                        )
-                    }
-
-                    // License Activation Dialog
-                    if (showActivationDialog) {
-                        ActivationDialog(
-                            licenseInfo = licenseInfo,
-                            installationId = installationId,
-                            language = language,
-                            onDismiss = { showActivationDialog = false },
-                            onActivate = { key, customerName -> viewModel.activateLicense(key, customerName) }
+                            onDismiss = { selectedQuoteForPreview = null }
                         )
                     }
                 }

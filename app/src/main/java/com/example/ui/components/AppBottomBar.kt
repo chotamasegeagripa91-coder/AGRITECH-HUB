@@ -12,53 +12,59 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.utils.AppStrings
 import com.example.ui.viewmodel.AppScreen
 
 sealed class BottomNavItem(
     val screen: AppScreen,
-    val titleKey: String,
+    val titleSw: String,
+    val titleEn: String,
     val selectedIcon: ImageVector,
     val unselectedIcon: ImageVector
 ) {
     data object Dashboard : BottomNavItem(
         screen = AppScreen.DASHBOARD,
-        titleKey = "nav_dashboard",
+        titleSw = "Dashibodi",
+        titleEn = "Dashboard",
         selectedIcon = Icons.Filled.Dashboard,
         unselectedIcon = Icons.Outlined.Dashboard
     )
 
     data object Materials : BottomNavItem(
         screen = AppScreen.MATERIALS,
-        titleKey = "nav_materials",
-        selectedIcon = Icons.Filled.Inventory,
+        titleSw = "Vifaa",
+        titleEn = "Materials",
+        selectedIcon = Icons.Filled.Inventory2,
         unselectedIcon = Icons.Outlined.Inventory2
     )
 
     data object Customers : BottomNavItem(
         screen = AppScreen.CUSTOMERS,
-        titleKey = "nav_customers",
+        titleSw = "Wateja",
+        titleEn = "Customers",
         selectedIcon = Icons.Filled.People,
         unselectedIcon = Icons.Outlined.People
     )
 
     data object NewQuote : BottomNavItem(
         screen = AppScreen.NEW_QUOTE,
-        titleKey = "nav_new_quote",
-        selectedIcon = Icons.Filled.PostAdd,
-        unselectedIcon = Icons.Outlined.PostAdd
+        titleSw = "Makadirio",
+        titleEn = "New Quote",
+        selectedIcon = Icons.Filled.AddCircle,
+        unselectedIcon = Icons.Outlined.AddCircle
     )
 
     data object QuotesHistory : BottomNavItem(
         screen = AppScreen.QUOTES_HISTORY,
-        titleKey = "nav_quotes",
+        titleSw = "Ankara",
+        titleEn = "Invoices",
         selectedIcon = Icons.Filled.ReceiptLong,
         unselectedIcon = Icons.Outlined.ReceiptLong
     )
 
     data object Settings : BottomNavItem(
         screen = AppScreen.SETTINGS,
-        titleKey = "nav_settings",
+        titleSw = "Mipangilio",
+        titleEn = "Settings",
         selectedIcon = Icons.Filled.Settings,
         unselectedIcon = Icons.Outlined.Settings
     )
@@ -85,7 +91,7 @@ fun AppBottomBar(
     ) {
         items.forEach { item ->
             val isSelected = currentScreen == item.screen
-            val title = AppStrings.t(item.titleKey, language)
+            val title = if (language == "sw") item.titleSw else item.titleEn
 
             NavigationBarItem(
                 selected = isSelected,
@@ -94,13 +100,13 @@ fun AppBottomBar(
                     Icon(
                         imageVector = if (isSelected) item.selectedIcon else item.unselectedIcon,
                         contentDescription = title,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 },
                 label = {
                     Text(
                         text = title,
-                        fontSize = 10.sp,
+                        fontSize = 9.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                         maxLines = 1
                     )

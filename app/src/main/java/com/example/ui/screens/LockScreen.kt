@@ -29,6 +29,9 @@ import androidx.compose.ui.unit.sp
 import com.example.ui.theme.AmberPrimary
 import com.example.ui.theme.RoseError
 import com.example.ui.utils.AppStrings
+import com.example.ui.utils.BiometricHelper
+import androidx.fragment.app.FragmentActivity
+import androidx.compose.ui.platform.LocalContext
 
 @Composable
 fun LockScreen(
@@ -367,7 +370,7 @@ fun LockScreen(
 
                     Spacer(modifier = Modifier.height(18.dp))
 
-                    Button(
+                     Button(
                         onClick = {
                             focusManager.clearFocus()
                             val success = onUnlock(passwordInput)
@@ -394,6 +397,73 @@ fun LockScreen(
                         )
                     }
 
+                    // Biometric Option (Only if hardware is supported)
+                    val context = LocalContext.current
+                    val isBiometricHardwareSupported = remember { BiometricHelper.isHardwareSupported(context) }
+                    val isBiometricEnrolled = remember { BiometricHelper.hasBiometricsEnrolled(context) }
+
+                    if (isBiometricHardwareSupported) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        TextButton(
+                            onClick = {
+                                val biometricActivity = context as? FragmentActivity
+                                if (biometricActivity != null) {
+                                    if (!isBiometricEnrolled) {
+                                        errorMessage = if (language == "sw") {
+                                            "Tafadhali weka alama ya kidole kwenye mipangilio ya simu yako kwanza."
+                                        } else {
+                                            "Please set up fingerprint/biometric authentication in your phone's system settings first."
+                                        }
+                                        return@TextButton
+                                    }
+
+                                    val title = if (language == "sw") "Fungua kwa Alama ya Kidole" else "Biometric Unlock"
+                                    val subtitle = if (language == "sw") "Gusa sensor ya alama ya kidole kufungua mfumo" else "Touch the fingerprint sensor to unlock the system"
+                                    val negativeBtnText = if (language == "sw") "Ghairi" else "Cancel"
+
+                                    BiometricHelper.showBiometricPrompt(
+                                        activity = biometricActivity,
+                                        title = title,
+                                        subtitle = subtitle,
+                                        negativeButtonText = negativeBtnText,
+                                        onSuccess = {
+                                            val ok = onUnlock("")
+                                            if (!ok) {
+                                                errorMessage = if (language == "sw") "Haikufaulu kufungua!" else "Unlock failed!"
+                                            }
+                                        },
+                                        onError = { err ->
+                                            errorMessage = err
+                                        }
+                                    )
+                                }
+                            },
+                            modifier = Modifier
+                                .align(Alignment.CenterHorizontally)
+                                .testTag("lock_biometric_login_btn"),
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = AmberPrimary
+                            )
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Fingerprint,
+                                    contentDescription = "Fingerprint",
+                                    modifier = Modifier.size(20.dp),
+                                    tint = AmberPrimary
+                                )
+                                Text(
+                                    text = if (language == "sw") "Ingia kwa Alama ya Kidole" else "Login with Fingerprint",
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = AmberPrimary
+                                )
+                            }
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(10.dp))
 
                     TextButton(
@@ -411,7 +481,7 @@ fun LockScreen(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (language == "sw") "Umesahau Nenosiri? / Badili Akaunti" else "Forgot Password? / Switch Account",
+                            text = if (language == "sw") "Umesahau Nenosiri?" else "Forgot Password?",
                             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
                             color = MaterialTheme.colorScheme.primary
                         )

@@ -133,16 +133,6 @@ data class LicenseInfo(
     val isTampered: Boolean = false
 )
 
-data class AdminGeneratedLicense(
-    val id: String,
-    val code: String,
-    val customerName: String,
-    val licenseType: LicenseType,
-    val deviceId: String,
-    val createdAt: String,
-    val expiresAt: String?
-)
-
 data class UserAccount(
     val userId: String,
     val businessName: String,
@@ -154,6 +144,7 @@ data class UserAccount(
     val isVerified: Boolean = false,
     val licenseType: LicenseType = LicenseType.TRIAL,
     val licenseStatus: LicenseStatus = LicenseStatus.ACTIVE,
+    val accountStatus: AccountStatus = AccountStatus.ACTIVE,
     val trialStartDate: String = "",
     val trialExpiryDate: String = "",
     val paidLicenseStartDate: String? = null,
@@ -164,6 +155,13 @@ data class UserAccount(
     val lastSyncTimestamp: Long = 0L,
     val createdAt: Long = System.currentTimeMillis()
 )
+
+enum class AccountStatus {
+    ACTIVE,
+    SUSPENDED,
+    DISABLED,
+    DELETED
+}
 
 data class CloudBackupPayload(
     val version: Int = 1,

@@ -153,8 +153,9 @@ fun ActivationDialog(
                                 text = installationId,
                                 style = MaterialTheme.typography.titleMedium.copy(
                                     fontWeight = FontWeight.Bold,
-                                    letterSpacing = 1.sp
+                                    letterSpacing = 0.5.sp
                                 ),
+                                modifier = Modifier.weight(1f, fill = false),
                                 color = MaterialTheme.colorScheme.primary
                             )
                             Button(

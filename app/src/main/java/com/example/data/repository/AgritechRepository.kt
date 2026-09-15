@@ -29,11 +29,30 @@ class AgritechRepository(
     }
 
     suspend fun updateMaterial(material: MaterialEntity) = materialDao.updateMaterial(material)
-    suspend fun deleteMaterial(material: MaterialEntity) = materialDao.deleteMaterial(material)
-    suspend fun deleteMaterialById(id: Int) = materialDao.deleteById(id)
+    suspend fun deleteMaterial(material: MaterialEntity) {
+        if (material.internalCode.isNotBlank()) {
+            preferences.markBuiltinMaterialDeleted(material.internalCode)
+        }
+        materialDao.deleteMaterial(material)
+    }
+
+    suspend fun deleteMaterialById(id: Int) {
+        val mat = materialDao.getMaterialById(id)
+        if (mat != null && mat.internalCode.isNotBlank()) {
+            preferences.markBuiltinMaterialDeleted(mat.internalCode)
+        }
+        materialDao.deleteById(id)
+    }
+
     suspend fun deleteMaterialsByCategory(category: String) {
         val all = materialDao.getAllMaterialsList()
-        val toDeleteIds = all.filter { MaterialCategoryUtils.matchesCategory(it, category) }.map { it.id }
+        val toDelete = all.filter { MaterialCategoryUtils.matchesCategory(it, category) }
+        for (m in toDelete) {
+            if (m.internalCode.isNotBlank()) {
+                preferences.markBuiltinMaterialDeleted(m.internalCode)
+            }
+        }
+        val toDeleteIds = toDelete.map { it.id }
         if (toDeleteIds.isNotEmpty()) {
             materialDao.deleteByIds(toDeleteIds)
         }
@@ -158,7 +177,13 @@ class AgritechRepository(
         val allMaterials = materialDao.getAllMaterialsList()
         if (allMaterials.isEmpty()) return 0
 
-        val groups = allMaterials.groupBy { MaterialKeyUtils.getNaturalKey(it) }
+        val groups = allMaterials.groupBy { item ->
+            if (item.internalCode.startsWith("MAT-EXCEL-")) {
+                item.internalCode
+            } else {
+                MaterialKeyUtils.getNaturalKey(item)
+            }
+        }
         val idsToDelete = mutableListOf<Int>()
         val remappedIds = mutableMapOf<Int, Int>()
         val survivorsToUpdate = mutableListOf<MaterialEntity>()
@@ -296,6 +321,39 @@ class AgritechRepository(
         materialDao.deleteAll()
         preferences.setDemoMaterialsRemoved(true)
         preferences.setDemoDataInitialized(true)
+        preferences.setAllBuiltinMaterialsDeleted(true)
+    }
+
+    suspend fun ensureBuiltinMaterialsSeeded(currentUserId: String = "") {
+        if (preferences.areAllBuiltinMaterialsDeleted()) {
+            return
+        }
+        val deletedCodes = preferences.getDeletedBuiltinCodes()
+        val allMaterials = materialDao.getAllMaterialsList()
+        val existingCodes = allMaterials.mapNotNull { it.internalCode.takeIf { c -> c.isNotBlank() } }.toSet()
+
+        val toInsert = mutableListOf<MaterialEntity>()
+        for (item in com.example.data.local.BuiltinMaterialsCatalog.ALL_BUILTIN_MATERIALS) {
+            // If user previously deleted this item, do not recreate
+            if (deletedCodes.contains(item.internalCode)) continue
+            // If item already exists by stable internalCode, skip
+            if (existingCodes.contains(item.internalCode)) continue
+
+            val itemKey = MaterialKeyUtils.getNaturalKey(item.name, item.category, item.unit)
+            // Check if exact variant (by code or matching key with same positive price) exists
+            val hasExactVariant = allMaterials.any {
+                it.internalCode == item.internalCode ||
+                (MaterialKeyUtils.getNaturalKey(it) == itemKey && it.price == item.price)
+            }
+            if (hasExactVariant) continue
+
+            toInsert.add(item.copy(userId = currentUserId, isDemo = false))
+        }
+
+        if (toInsert.isNotEmpty()) {
+            materialDao.insertAll(toInsert)
+        }
+        preferences.setBuiltinInventorySeeded(true)
     }
 
     suspend fun deleteDemoData() {

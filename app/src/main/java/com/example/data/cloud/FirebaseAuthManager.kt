@@ -597,9 +597,9 @@ object FirebaseAuthManager {
     }
 
     /**
-     * Converts technical Firebase errors into clean, friendly human messages.
-     * Ensures forbidden terms like "BILLING_NOT_ENABLED" or "This operation is not allowed"
-     * are NEVER displayed to the user.
+     * Converts technical Firebase and Credential Manager errors into clean, friendly human messages.
+     * Accurately recognizes email collision, incorrect/expired credentials, weak passwords,
+     * reCAPTCHA validation failures, and network timeouts.
      */
     fun formatFriendlyError(e: Throwable?, language: String): String {
         if (e == null) {
@@ -607,9 +607,99 @@ object FirebaseAuthManager {
         }
 
         val name = e.javaClass.simpleName
-        val msg = e.message ?: ""
+        val msg = buildString {
+            append(e.message ?: "")
+            append(" ")
+            append(e.cause?.message ?: "")
+            if (e is com.google.firebase.auth.FirebaseAuthException) {
+                append(" ")
+                append(e.errorCode)
+            }
+        }
 
         return when {
+            // 1. Email Already Exists (User Collision)
+            e is FirebaseAuthUserCollisionException ||
+                    name.contains("UserCollision", ignoreCase = true) ||
+                    msg.contains("already in use", ignoreCase = true) ||
+                    msg.contains("already exists", ignoreCase = true) ||
+                    msg.contains("EMAIL_EXISTS", ignoreCase = true) ||
+                    msg.contains("EMAIL_ALREADY_IN_USE", ignoreCase = true) ||
+                    msg.contains("ERROR_EMAIL_ALREADY_IN_USE", ignoreCase = true) -> {
+                if (language == "sw")
+                    "Akaunti yenye barua pepe hii tayari ipo. Tafadhali chagua Kuingia (Login) au weka upya nenosiri kama umelisahau."
+                else
+                    "An account with this email address already exists. Please choose Login or reset your password."
+            }
+
+            // 2. Incorrect Credentials / Wrong Password / Expired
+            e is FirebaseAuthInvalidCredentialsException ||
+                    name.contains("InvalidCredentials", ignoreCase = true) ||
+                    msg.contains("supplied auth credential is incorrect", ignoreCase = true) ||
+                    msg.contains("incorrect, malformed or has expired", ignoreCase = true) ||
+                    msg.contains("malformed or has expired", ignoreCase = true) ||
+                    msg.contains("credential is incorrect", ignoreCase = true) ||
+                    msg.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true) ||
+                    msg.contains("INVALID_CREDENTIAL", ignoreCase = true) ||
+                    msg.contains("WRONG_PASSWORD", ignoreCase = true) ||
+                    msg.contains("wrong password", ignoreCase = true) ||
+                    msg.contains("ERROR_WRONG_PASSWORD", ignoreCase = true) ||
+                    msg.contains("ERROR_INVALID_CREDENTIAL", ignoreCase = true) -> {
+                if (language == "sw")
+                    "Barua pepe au nenosiri si sahihi (au akaunti ilisajiliwa kwa Google). Bonyeza 'Umesahau nenosiri?' kuweka jipya, au tumia 'Endelea na Google'."
+                else
+                    "Incorrect email or password (or account was registered with Google). Tap 'Forgot password?' to reset, or use 'Continue with Google'."
+            }
+
+            // 3. User Not Found
+            e is FirebaseAuthInvalidUserException ||
+                    name.contains("InvalidUser", ignoreCase = true) ||
+                    msg.contains("USER_NOT_FOUND", ignoreCase = true) ||
+                    msg.contains("user-not-found", ignoreCase = true) ||
+                    msg.contains("no user record", ignoreCase = true) ||
+                    msg.contains("ERROR_USER_NOT_FOUND", ignoreCase = true) -> {
+                if (language == "sw")
+                    "Hakuna akaunti yenye barua pepe hii. Tafadhali fungua akaunti mpya kwa kubonyeza 'Jisajili'."
+                else
+                    "No account found with this email. Please create an account by tapping 'Sign Up'."
+            }
+
+            // 4. Weak Password
+            e is FirebaseAuthWeakPasswordException ||
+                    name.contains("WeakPassword", ignoreCase = true) ||
+                    msg.contains("WEAK_PASSWORD", ignoreCase = true) ||
+                    msg.contains("Password should be at least", ignoreCase = true) ||
+                    msg.contains("ERROR_WEAK_PASSWORD", ignoreCase = true) -> {
+                if (language == "sw")
+                    "Nenosiri ni dhaifu mno. Tafadhali tumia nenosiri lenye angalau herufi au namba 6."
+                else
+                    "Password is too weak. Please use at least 6 characters."
+            }
+
+            // 5. Rate Limiting / Too Many Attempts
+            msg.contains("TOO_MANY_ATTEMPTS", ignoreCase = true) ||
+                    msg.contains("too many requests", ignoreCase = true) ||
+                    msg.contains("temporarily blocked", ignoreCase = true) ||
+                    msg.contains("blocked all requests", ignoreCase = true) ||
+                    msg.contains("unusual activity", ignoreCase = true) -> {
+                if (language == "sw")
+                    "Majaribio mengi mno yasiyo sahihi. Akaunti imezuiwa kwa muda mfupi kwa usalama. Tafadhali subiri dakika chache au weka upya nenosiri."
+                else
+                    "Too many failed attempts. Access temporarily disabled for security. Please wait a few minutes or reset your password."
+            }
+
+            // 6. Security / Recaptcha Verification
+            name.contains("Recaptcha", ignoreCase = true) ||
+                    msg.contains("Recaptcha", ignoreCase = true) ||
+                    msg.contains("safety", ignoreCase = true) ||
+                    msg.contains("appcheck", ignoreCase = true) -> {
+                if (language == "sw")
+                    "Hitilafu ya uthibitishaji wa usalama. Tafadhali hakiki muunganisho wa intaneti na ujaribu tena."
+                else
+                    "Security verification check failed. Please check your internet connection and try again."
+            }
+
+            // 7. Google Credential Manager
             name.contains("NoCredential", ignoreCase = true) ||
                     msg.contains("No credential available", ignoreCase = true) -> {
                 if (language == "sw")
@@ -632,62 +722,28 @@ object FirebaseAuthManager {
                 else
                     "Google Play services is not properly configured on this device."
             }
-            e is FirebaseAuthWeakPasswordException ||
-                    name.contains("WeakPassword", ignoreCase = true) ||
-                    msg.contains("WEAK_PASSWORD", ignoreCase = true) -> {
-                if (language == "sw")
-                    "Nenosiri ni dhaifu mno. Tafadhali tumia herufi au namba angalau 6."
-                else
-                    "Password is too weak. Please use at least 6 characters."
-            }
 
-            e is FirebaseAuthUserCollisionException ||
-                    name.contains("UserCollision", ignoreCase = true) ||
-                    msg.contains("EMAIL_EXISTS", ignoreCase = true) -> {
-                if (language == "sw")
-                    "Akaunti yenye barua pepe hii tayari ipo. Tafadhali chagua Kuingia (Login)."
-                else
-                    "An account with this email already exists. Please choose Login."
-            }
-
-            e is FirebaseAuthInvalidUserException ||
-                    name.contains("InvalidUser", ignoreCase = true) ||
-                    msg.contains("USER_NOT_FOUND", ignoreCase = true) -> {
-                if (language == "sw")
-                    "Hakuna akaunti yenye barua pepe hii. Tafadhali fungua akaunti mpya."
-                else
-                    "No account found with this email. Please create an account."
-            }
-
-            e is FirebaseAuthInvalidCredentialsException ||
-                    name.contains("InvalidCredentials", ignoreCase = true) ||
-                    msg.contains("INVALID_LOGIN_CREDENTIALS", ignoreCase = true) ||
-                    msg.contains("WRONG_PASSWORD", ignoreCase = true) -> {
-                if (language == "sw")
-                    "Barua pepe au nenosiri si sahihi. Tafadhali hakiki tena."
-                else
-                    "Incorrect email or password. Please check your credentials."
-            }
-
+            // 8. Network Connection
             name.contains("Network", ignoreCase = true) ||
                     msg.contains("network", ignoreCase = true) ||
                     msg.contains("connection", ignoreCase = true) ||
-                    msg.contains("timeout", ignoreCase = true) -> {
+                    msg.contains("timeout", ignoreCase = true) ||
+                    msg.contains("unreachable", ignoreCase = true) -> {
                 if (language == "sw")
-                    "Hitilafu ya mtandao. Tafadhali hakiki muunganisho wako wa intaneti."
+                    "Hitilafu ya mtandao. Tafadhali hakiki muunganisho wako wa intaneti na ujaribu tena."
                 else
-                    "Network connection problem. Please check your internet connection."
+                    "Network connection problem. Please check your internet connection and try again."
             }
 
-            // Strictly filter out billing, SMS, or raw internal errors
+            // 9. Filter out billing or raw internal errors
             msg.contains("BILLING", ignoreCase = true) ||
                     msg.contains("OPERATION_NOT_ALLOWED", ignoreCase = true) ||
                     msg.contains("not allowed", ignoreCase = true) ||
                     msg.contains("SMS", ignoreCase = true) -> {
                 if (language == "sw")
-                    "Hitilafu ya uthibitishaji imetokea. Tafadhali jaribu tena baada ya muda mfupi."
+                    "Hitilafu ya huduma ya uthibitishaji. Tafadhali jaribu tena baada ya muda mfupi au tumia Google."
                 else
-                    "Authentication service error. Please try again in a moment."
+                    "Authentication service error. Please try again in a moment or use Google Sign-In."
             }
 
             else -> {

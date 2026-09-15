@@ -167,6 +167,33 @@ class AppPreferences(context: Context) {
         clearUserSession()
     }
 
+    fun saveBiometricCredentials(type: String, email: String, secret: String, displayName: String? = null) {
+        prefs.edit()
+            .putString("biometric_auth_type", type)
+            .putString("biometric_email", email)
+            .putString("biometric_secret", secret)
+            .putString("biometric_display_name", displayName)
+            .apply()
+    }
+
+    fun getBiometricAuthType(): String? = prefs.getString("biometric_auth_type", null)
+    fun getBiometricEmail(): String? = prefs.getString("biometric_email", null)
+    fun getBiometricSecret(): String? = prefs.getString("biometric_secret", null)
+    fun getBiometricDisplayName(): String? = prefs.getString("biometric_display_name", null)
+
+    fun hasBiometricCredentials(): Boolean {
+        return !getBiometricAuthType().isNullOrBlank() && !getBiometricEmail().isNullOrBlank() && !getBiometricSecret().isNullOrBlank()
+    }
+
+    fun clearBiometricCredentials() {
+        prefs.edit()
+            .remove("biometric_auth_type")
+            .remove("biometric_email")
+            .remove("biometric_secret")
+            .remove("biometric_display_name")
+            .apply()
+    }
+
     fun getLastCloudSyncTime(): Long =
         prefs.getLong("agritech_last_cloud_sync", 0L)
 
@@ -266,70 +293,6 @@ class AppPreferences(context: Context) {
         return LicensingEngine.getInstallationId(prefs)
     }
 
-    fun getAdminGeneratedLicenses(): List<AdminGeneratedLicense> {
-        val json = prefs.getString("agritech_admin_licenses", null) ?: return emptyList()
-        val list = mutableListOf<AdminGeneratedLicense>()
-        try {
-            val array = JSONArray(json)
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                list.add(
-                    AdminGeneratedLicense(
-                        id = obj.getString("id"),
-                        code = obj.getString("code"),
-                        customerName = obj.getString("customerName"),
-                        licenseType = LicenseType.fromCode(obj.getString("licenseType")),
-                        deviceId = obj.getString("deviceId"),
-                        createdAt = obj.getString("createdAt"),
-                        expiresAt = if (obj.has("expiresAt") && !obj.isNull("expiresAt")) obj.getString("expiresAt") else null
-                    )
-                )
-            }
-        } catch (e: Exception) {
-            // ignore
-        }
-        return list
-    }
-
-    fun saveAdminGeneratedLicense(license: AdminGeneratedLicense) {
-        val current = getAdminGeneratedLicenses().toMutableList()
-        current.removeAll { it.code == license.code }
-        current.add(0, license)
-
-        val array = JSONArray()
-        for (item in current) {
-            val obj = JSONObject().apply {
-                put("id", item.id)
-                put("code", item.code)
-                put("customerName", item.customerName)
-                put("licenseType", item.licenseType.code)
-                put("deviceId", item.deviceId)
-                put("createdAt", item.createdAt)
-                put("expiresAt", item.expiresAt ?: JSONObject.NULL)
-            }
-            array.put(obj)
-        }
-        prefs.edit().putString("agritech_admin_licenses", array.toString()).apply()
-    }
-
-    fun deleteAdminGeneratedLicense(id: String) {
-        val current = getAdminGeneratedLicenses().filterNot { it.id == id }
-        val array = JSONArray()
-        for (item in current) {
-            val obj = JSONObject().apply {
-                put("id", item.id)
-                put("code", item.code)
-                put("customerName", item.customerName)
-                put("licenseType", item.licenseType.code)
-                put("deviceId", item.deviceId)
-                put("createdAt", item.createdAt)
-                put("expiresAt", item.expiresAt ?: JSONObject.NULL)
-            }
-            array.put(obj)
-        }
-        prefs.edit().putString("agritech_admin_licenses", array.toString()).apply()
-    }
-
     fun isRememberMe(): Boolean {
         return prefs.getBoolean("agritech_remember_me", true)
     }
@@ -390,5 +353,26 @@ class AppPreferences(context: Context) {
     fun getLastSyncUserId(): String = prefs.getString("agritech_last_sync_uid", "") ?: ""
     fun setLastSyncUserId(uid: String) {
         prefs.edit().putString("agritech_last_sync_uid", uid).apply()
+    }
+
+    fun isBuiltinInventorySeeded(): Boolean = prefs.getBoolean("agritech_builtin_inventory_seeded_v1", false)
+    fun setBuiltinInventorySeeded(seeded: Boolean) {
+        prefs.edit().putBoolean("agritech_builtin_inventory_seeded_v1", seeded).apply()
+    }
+
+    fun areAllBuiltinMaterialsDeleted(): Boolean = prefs.getBoolean("agritech_all_builtin_deleted", false)
+    fun setAllBuiltinMaterialsDeleted(deleted: Boolean) {
+        prefs.edit().putBoolean("agritech_all_builtin_deleted", deleted).apply()
+    }
+
+    fun getDeletedBuiltinCodes(): Set<String> {
+        return prefs.getStringSet("agritech_deleted_builtin_codes", emptySet()) ?: emptySet()
+    }
+
+    fun markBuiltinMaterialDeleted(internalCode: String) {
+        if (internalCode.isBlank()) return
+        val current = getDeletedBuiltinCodes().toMutableSet()
+        current.add(internalCode)
+        prefs.edit().putStringSet("agritech_deleted_builtin_codes", current).apply()
     }
 }

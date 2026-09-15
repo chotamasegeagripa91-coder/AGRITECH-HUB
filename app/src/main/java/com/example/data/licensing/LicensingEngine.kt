@@ -2,7 +2,6 @@ package com.example.data.licensing
 
 import android.content.SharedPreferences
 import android.util.Base64
-import com.example.data.models.AdminGeneratedLicense
 import com.example.data.models.LicenseInfo
 import com.example.data.models.LicenseStatus
 import com.example.data.models.LicenseType
@@ -55,6 +54,52 @@ object LicensingEngine {
     )
 
     /**
+     * Extracts clean phone model name (e.g. Samsung A065F/DS, TECNO BG6, Tecno Spark 20, etc.).
+     */
+    fun getDeviceModelName(): String {
+        val mfg = try {
+            android.os.Build.MANUFACTURER.orEmpty().trim()
+        } catch (e: Exception) { "" }
+        val model = try {
+            android.os.Build.MODEL.orEmpty().trim()
+        } catch (e: Exception) { "" }
+
+        val cleanMfg = when {
+            mfg.isBlank() || mfg.equals("unknown", ignoreCase = true) || mfg.equals("generic", ignoreCase = true) || mfg.equals("android", ignoreCase = true) -> ""
+            else -> mfg
+        }
+        var cleanModel = when {
+            model.isBlank() || model.equals("unknown", ignoreCase = true) || model.equals("generic", ignoreCase = true) || model.equals("android", ignoreCase = true) -> ""
+            else -> model
+        }
+
+        // If Samsung, strip common "SM-" prefix (e.g. SM-A065F/DS -> A065F/DS)
+        if (cleanMfg.equals("samsung", ignoreCase = true) && cleanModel.startsWith("SM-", ignoreCase = true)) {
+            cleanModel = cleanModel.substring(3).trim()
+        }
+
+        val formattedMfg = if (cleanMfg.all { it.isUpperCase() } && cleanMfg.length > 3) {
+            cleanMfg
+        } else {
+            cleanMfg.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
+        }
+
+        val result = when {
+            formattedMfg.isNotEmpty() && cleanModel.isNotEmpty() -> {
+                if (cleanModel.startsWith(formattedMfg, ignoreCase = true)) {
+                    cleanModel
+                } else {
+                    "$formattedMfg $cleanModel"
+                }
+            }
+            formattedMfg.isNotEmpty() -> formattedMfg
+            cleanModel.isNotEmpty() -> cleanModel
+            else -> "Android Device"
+        }
+        return result.trim()
+    }
+
+    /**
      * Extracts device brand prefix (e.g. TECNO, SAMSUNG, REDMI, INFINIX, OPPO, VIVO).
      */
     fun getDeviceBrandPrefix(): String {
@@ -101,15 +146,21 @@ object LicensingEngine {
     }
 
     /**
-     * Gets or generates the unique installation ID for this device with the device brand (e.g. TECNO-XXXX-XXXX, SAMSUNG-XXXX-XXXX).
+     * Gets or generates the installation ID matching the phone model name (e.g. Samsung A065F/DS, TECNO BG6).
      */
     fun getInstallationId(prefs: SharedPreferences): String {
-        var id = prefs.getString("agritech_installation_id", null)
-        if (id.isNullOrBlank() || id.startsWith("AGRI-")) {
-            val brand = getDeviceBrandPrefix()
-            val randomHex = UUID.randomUUID().toString().replace("-", "").take(8).uppercase(Locale.ROOT)
-            id = "$brand-${randomHex.take(4)}-${randomHex.substring(4, 8)}"
-            prefs.edit().putString("agritech_installation_id", id).apply()
+        var id = prefs.getString("agritech_device_name_id", null)
+        if (id.isNullOrBlank()) {
+            val deviceName = getDeviceModelName()
+            id = deviceName
+            val oldId = prefs.getString("agritech_installation_id", null)
+            if (!oldId.isNullOrBlank() && oldId != deviceName) {
+                prefs.edit().putString("agritech_installation_id_legacy", oldId).apply()
+            }
+            prefs.edit()
+                .putString("agritech_device_name_id", id)
+                .putString("agritech_installation_id", id)
+                .apply()
         }
         return id
     }
@@ -117,22 +168,6 @@ object LicensingEngine {
     fun getDeviceShortCode(fullId: String): String {
         val clean = fullId.replace(Regex("[^A-Za-z0-9]"), "").uppercase(Locale.ROOT)
         return clean.takeLast(4).ifEmpty { "UNIV" }
-    }
-
-    /**
-     * Generates a license code record.
-     * Note: Cryptographic signing is done exclusively via RSA-2048 using the Admin license generator tool
-     * (tools/license-generator/generate_license.py) with the offline RSA Private Key.
-     */
-    fun generateActivationCode(
-        customerName: String,
-        licenseType: LicenseType,
-        deviceId: String? = null,
-        customDurationDays: Int? = null
-    ): Pair<String, AdminGeneratedLicense> {
-        throw UnsupportedOperationException(
-            "Utoaji wa leseni hufanywa na Admin pekee kupitia tools/license-generator/generate_license.py kwa kutumia Ufunguo wa Siri (RSA Private Key)."
-        )
     }
 
     data class VerificationResult(
@@ -150,7 +185,8 @@ object LicensingEngine {
      */
     fun verifyActivationCode(
         code: String,
-        currentInstallationId: String
+        currentInstallationId: String,
+        legacyInstallationId: String? = null
     ): VerificationResult {
         val clean = code.trim().replace("\\s".toRegex(), "")
         if (clean.isBlank()) {
@@ -206,11 +242,21 @@ object LicensingEngine {
 
             // Device Installation ID Matching
             val currentShortCode = getDeviceShortCode(currentInstallationId)
+            val legacyShortCode = legacyInstallationId?.let { getDeviceShortCode(it) }
             val targetShortCode = getDeviceShortCode(installId)
             val isUniversal = installId.equals("UNIVERSAL", ignoreCase = true) || installId.isBlank()
+
+            val cleanTarget = installId.replace(Regex("[^A-Za-z0-9]"), "")
+            val cleanCurrent = currentInstallationId.replace(Regex("[^A-Za-z0-9]"), "")
+            val cleanLegacy = legacyInstallationId?.replace(Regex("[^A-Za-z0-9]"), "")
+
             val isMatch = isUniversal ||
                     installId.equals(currentInstallationId, ignoreCase = true) ||
-                    targetShortCode.equals(currentShortCode, ignoreCase = true)
+                    (cleanTarget.isNotEmpty() && cleanTarget.equals(cleanCurrent, ignoreCase = true)) ||
+                    (legacyInstallationId != null && installId.equals(legacyInstallationId, ignoreCase = true)) ||
+                    (cleanLegacy != null && cleanTarget.isNotEmpty() && cleanTarget.equals(cleanLegacy, ignoreCase = true)) ||
+                    targetShortCode.equals(currentShortCode, ignoreCase = true) ||
+                    (legacyShortCode != null && targetShortCode.equals(legacyShortCode, ignoreCase = true))
 
             if (!isMatch) {
                 return VerificationResult(
@@ -269,10 +315,14 @@ object LicensingEngine {
             }
 
             val currentShortCode = getDeviceShortCode(currentInstallationId)
-            if (devSegment != "UNIV" && devSegment != currentShortCode) {
+            val legacyShortCode = legacyInstallationId?.let { getDeviceShortCode(it) }
+            val isShortMatch = devSegment == "UNIV" ||
+                    devSegment.equals(currentShortCode, ignoreCase = true) ||
+                    (legacyShortCode != null && devSegment.equals(legacyShortCode, ignoreCase = true))
+            if (!isShortMatch) {
                 return VerificationResult(
                     valid = false,
-                    message = "Code hii ya leseni imefungwa kwenye kifaa ($devSegment). Kifaa chako ni: $currentShortCode."
+                    message = "Code hii ya leseni imefungwa kwenye kifaa ($devSegment). Kifaa chako ni: $currentShortCode ($currentInstallationId)."
                 )
             }
 
@@ -351,7 +401,8 @@ object LicensingEngine {
         val activatedAt = prefs.getString("agritech_license_activated_at", null)
 
         if (licenseKey.isNotBlank()) {
-            val verification = verifyActivationCode(licenseKey, installationId)
+            val legacyId = prefs.getString("agritech_installation_id_legacy", null)
+            val verification = verifyActivationCode(licenseKey, installationId, legacyId)
             if (verification.valid) {
                 if (!expiresAt.isNullOrBlank()) {
                     try {
@@ -466,7 +517,8 @@ object LicensingEngine {
     ): Pair<Boolean, String> {
         val cleanKey = key.trim()
         val installationId = getInstallationId(prefs)
-        val result = verifyActivationCode(cleanKey, installationId)
+        val legacyId = prefs.getString("agritech_installation_id_legacy", null)
+        val result = verifyActivationCode(cleanKey, installationId, legacyId)
 
         if (result.valid) {
             val editor = prefs.edit()

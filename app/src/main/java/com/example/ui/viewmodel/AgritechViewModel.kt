@@ -34,7 +34,6 @@ enum class AppScreen {
     QUOTES_HISTORY,
     SETTINGS
 }
-
 class AgritechViewModel(application: Application) : AndroidViewModel(application) {
 
     private val preferences = AppPreferences(application)
@@ -96,9 +95,6 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
     private val _language = MutableStateFlow(preferences.getLanguage())
     val language: StateFlow<String> = _language.asStateFlow()
 
-    private val _adminGeneratedLicenses = MutableStateFlow(preferences.getAdminGeneratedLicenses())
-    val adminGeneratedLicenses: StateFlow<List<AdminGeneratedLicense>> = _adminGeneratedLicenses.asStateFlow()
-
     private var lastUserActivityTimestamp = System.currentTimeMillis()
 
     init {
@@ -107,23 +103,24 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             if (!preferences.isDemoDataInitialized()) {
                 repository.ensureDemoDataSeeded()
             }
+            val uid = preferences.getUserAccount()?.userId ?: ""
+            repository.ensureBuiltinMaterialsSeeded(uid)
             repository.cleanupDuplicateMaterialsOnce()
         }
-
         // Automatically sync data with Firebase whenever an internet connection is detected
         viewModelScope.launch {
             networkMonitor.isOnline.collect { online ->
                 if (online && _isUserRegistered.value) {
                     triggerAutoSync(silent = true, delayMs = 1200L)
+
                 }
             }
         }
     }
-
     fun recordUserActivity() {
         lastUserActivityTimestamp = System.currentTimeMillis()
-    }
 
+    }
     fun onAppForegrounded() {
         if (_autoLockEnabled.value && !_isLocked.value) {
             val elapsed = System.currentTimeMillis() - lastUserActivityTimestamp
@@ -132,16 +129,16 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             }
         }
         recordUserActivity()
-    }
 
+    }
     fun getInstallationId(): String {
         return preferences.getInstallationId()
-    }
 
+    }
     fun navigateTo(screen: AppScreen) {
         _currentScreen.value = screen
-    }
 
+    }
     fun createInitialPassword(password: String): Boolean {
         if (password.isNotBlank()) {
             preferences.setPassword(password.trim())
@@ -149,8 +146,8 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             return true
         }
         return false
-    }
 
+    }
     fun unlockApp(password: String): Boolean {
         if (preferences.verifyPassword(password)) {
             _isLocked.value = false
@@ -158,17 +155,21 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             return true
         }
         return false
-    }
 
+    }
+    fun unlockWithBiometric() {
+        _isLocked.value = false
+        _currentScreen.value = AppScreen.DASHBOARD
+    }
     fun lockApp() {
         _isLocked.value = true
-    }
 
+    }
     fun setAutoLockEnabled(enabled: Boolean) {
         _autoLockEnabled.value = enabled
         preferences.setAutoLockEnabled(enabled)
-    }
 
+    }
     // ==========================================
     // CLOUD AUTHENTICATION & TRIAL REGISTRATION
     // ==========================================
@@ -181,8 +182,8 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
         password: String
     ): AgritechCloudService.ServerResponse<UserAccount> {
         return registerUserDirectly(businessName, ownerFullName, phone, email, password)
-    }
 
+    }
     /**
      * Direct registration using Firebase Email and Password.
      * Activates 30-day trial immediately, no SMS OTP needed.
@@ -208,9 +209,13 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
 
         if (response.success && response.data != null) {
             val account = response.data
-            runBlocking(Dispatchers.IO) { repository.clearAllLocalData(preserveDemo = true) }
+            runBlocking(Dispatchers.IO) { 
+                repository.clearAllLocalData(preserveDemo = true) 
+                repository.ensureBuiltinMaterialsSeeded(account.userId)
+            }
             preferences.saveUserAccount(account)
             preferences.setPassword(password)
+            preferences.saveBiometricCredentials("email", email, password)
             preferences.setTrialStartDate(account.trialStartDate)
 
             val currentBiz = preferences.getBusinessSettings()
@@ -232,8 +237,8 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             triggerAutoSync(silent = true, delayMs = 500L)
         }
         return response
-    }
 
+    }
     fun verifyRegistrationOtp(
         emailOrPhone: String,
         otpCode: String
@@ -262,12 +267,15 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             _isLocked.value = false
             refreshLicenseInfo()
 
-            // Initial cloud backup synchronization
-            triggerAutoSync(silent = true, delayMs = 500L)
+            viewModelScope.launch(Dispatchers.IO) {
+                repository.ensureBuiltinMaterialsSeeded(account.userId)
+                // Initial cloud backup synchronization
+                triggerAutoSync(silent = true, delayMs = 500L)
+            }
         }
         return response
-    }
 
+    }
     fun completeFirebaseVerifiedRegistration(
         emailOrPhone: String,
         firebaseUid: String? = null
@@ -294,15 +302,18 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             _isLocked.value = false
             refreshLicenseInfo()
 
-            triggerAutoSync(silent = true, delayMs = 500L)
+            viewModelScope.launch(Dispatchers.IO) {
+                repository.ensureBuiltinMaterialsSeeded(account.userId)
+                triggerAutoSync(silent = true, delayMs = 500L)
+            }
         }
         return response
-    }
 
+    }
     fun getFirebaseDiagnostics(): com.example.data.cloud.FirebasePhoneAuthManager.FirebaseDiagnostics {
         return com.example.data.cloud.FirebasePhoneAuthManager.getDiagnostics(getApplication())
-    }
 
+    }
     fun loginUser(
         emailOrPhone: String,
         password: String,
@@ -318,9 +329,15 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
         }
         if (response.success && response.data != null) {
             val account = response.data
-            runBlocking(Dispatchers.IO) { repository.clearAllLocalData(preserveDemo = true) }
+            runBlocking(Dispatchers.IO) { 
+                repository.clearAllLocalData(preserveDemo = true) 
+                if (!autoRestoreCloudData) {
+                    repository.ensureBuiltinMaterialsSeeded(account.userId)
+                }
+            }
             preferences.saveUserAccount(account)
             preferences.setPassword(password)
+            preferences.saveBiometricCredentials("email", emailOrPhone, password)
 
             // Update business identity to registered business name
             val currentBiz = preferences.getBusinessSettings()
@@ -337,8 +354,8 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
                 preferences.activateLicense(account.paidLicenseKey, account.businessName)
             } else if (account.trialStartDate != null) {
                 preferences.setTrialStartDate(account.trialStartDate)
-            }
 
+            }
             _isPasswordConfigured.value = true
             _isUserRegistered.value = true
             _userAccount.value = account
@@ -359,6 +376,7 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
                         refreshLicenseInfo()
                         restoredData = true
                     }
+                    repository.ensureBuiltinMaterialsSeeded(account.userId)
                     // Trigger immediate background sync right after successful login & restore check
                     triggerAutoSync(silent = true, delayMs = 600L)
                     withContext(Dispatchers.Main) {
@@ -371,8 +389,8 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             }
         }
         onComplete(response, false)
-    }
 
+    }
     /**
      * Completes authentication and provisions or links an account authenticated via Google Sign-In.
      */
@@ -392,8 +410,14 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
         )
         if (response.success && response.data != null) {
             val account = response.data
-            runBlocking(Dispatchers.IO) { repository.clearAllLocalData(preserveDemo = true) }
+            runBlocking(Dispatchers.IO) { 
+                repository.clearAllLocalData(preserveDemo = true) 
+                if (!autoRestoreCloudData) {
+                    repository.ensureBuiltinMaterialsSeeded(account.userId)
+                }
+            }
             preferences.saveUserAccount(account)
+            preferences.saveBiometricCredentials("google", email, firebaseUid, displayName)
 
             // Update business identity
             val currentBiz = preferences.getBusinessSettings()
@@ -409,8 +433,8 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
                 preferences.activateLicense(account.paidLicenseKey, account.businessName)
             } else if (account.trialStartDate != null) {
                 preferences.setTrialStartDate(account.trialStartDate)
-            }
 
+            }
             _isPasswordConfigured.value = true
             _isUserRegistered.value = true
             _userAccount.value = account
@@ -431,6 +455,7 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
                         refreshLicenseInfo()
                         restoredData = true
                     }
+                    repository.ensureBuiltinMaterialsSeeded(account.userId)
                     // Trigger immediate background sync right after successful Google login & restore check
                     triggerAutoSync(silent = true, delayMs = 600L)
                     withContext(Dispatchers.Main) {
@@ -443,8 +468,8 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             }
         }
         onComplete(response, false)
-    }
 
+    }
     fun isRememberMe(): Boolean = preferences.isRememberMe()
     fun setRememberMe(remember: Boolean) = preferences.setRememberMe(remember)
     fun getSavedLoginEmail(): String = preferences.getSavedLoginEmail()
@@ -452,8 +477,8 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
 
     fun requestForgotPasswordOtp(emailOrPhone: String): AgritechCloudService.ServerResponse<String> {
         return cloudService.requestForgotPasswordOtp(emailOrPhone)
-    }
 
+    }
     fun resetPasswordWithOtp(
         emailOrPhone: String,
         otpCode: String,
@@ -467,12 +492,12 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             _isPasswordConfigured.value = true
         }
         return res
-    }
 
+    }
     fun resendOtp(emailOrPhone: String): AgritechCloudService.ServerResponse<String> {
         return cloudService.resendOtp(emailOrPhone)
-    }
 
+    }
     /**
      * Automatically and safely synchronizes data with Firebase in the background.
      * Guaranteed not to block UI, not to duplicate requests (Mutex protected),
@@ -492,9 +517,11 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
                 try {
                     _isCloudSyncing.value = true
                     // Filter out DEMO/SAMPLE items so they are NEVER uploaded as real user data to Firestore
-                    val realMaterials = materials.value.filter { !com.example.ui.utils.DemoUtils.isDemoMaterial(it) }
-                    val realCustomers = customers.value.filter { !com.example.ui.utils.DemoUtils.isDemoCustomer(it) }
-                    val realQuotes = quotes.value.filter { !com.example.ui.utils.DemoUtils.isDemoQuote(it) }
+                    val realMaterials = materials.value.filter { !com.example.ui.utils.DemoUtils.isDemoMaterial(it) 
+                    }
+                    val realCustomers = customers.value.filter { !com.example.ui.utils.DemoUtils.isDemoCustomer(it) 
+                    }
+                    val realQuotes = quotes.value.filter { !com.example.ui.utils.DemoUtils.isDemoQuote(it) } 
 
                     val payload = CloudBackupPayload(
                         version = 1,
@@ -517,25 +544,27 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
                 } finally {
                     _isCloudSyncing.value = false
                     syncMutex.unlock()
+
                 }
             }
         }
     }
-
     fun syncDataToCloud(onComplete: (Boolean, String) -> Unit = { _, _ -> }) {
         val user = _userAccount.value ?: preferences.getUserAccount()
         if (user == null || !user.isVerified) {
             onComplete(false, "Hakuna akaunti iliyothibitishwa.")
             return
-        }
 
+        }
         viewModelScope.launch(Dispatchers.IO) {
             _isCloudSyncing.value = true
             try {
                 // Filter out DEMO/SAMPLE items so they are NEVER uploaded as real user data to Firestore
-                val realMaterials = materials.value.filter { !com.example.ui.utils.DemoUtils.isDemoMaterial(it) }
-                val realCustomers = customers.value.filter { !com.example.ui.utils.DemoUtils.isDemoCustomer(it) }
-                val realQuotes = quotes.value.filter { !com.example.ui.utils.DemoUtils.isDemoQuote(it) }
+                val realMaterials = materials.value.filter { !com.example.ui.utils.DemoUtils.isDemoMaterial(it) 
+                }
+                val realCustomers = customers.value.filter { !com.example.ui.utils.DemoUtils.isDemoCustomer(it) 
+                }
+                val realQuotes = quotes.value.filter { !com.example.ui.utils.DemoUtils.isDemoQuote(it) } 
 
                 val payload = CloudBackupPayload(
                     version = 1,
@@ -566,18 +595,18 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
                 withContext(Dispatchers.Main) {
                     _isCloudSyncing.value = false
                     onComplete(false, "Hitilafu: ${e.message}")
+
                 }
             }
         }
     }
-
     fun restoreDataFromCloud(onComplete: (Boolean, String) -> Unit = { _, _ -> }) {
         val user = _userAccount.value ?: preferences.getUserAccount()
         if (user == null || !user.isVerified) {
             onComplete(false, "Hakuna akaunti iliyothibitishwa.")
             return
-        }
 
+        }
         viewModelScope.launch(Dispatchers.IO) {
             _isCloudSyncing.value = true
             try {
@@ -603,14 +632,15 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
                 withContext(Dispatchers.Main) {
                     _isCloudSyncing.value = false
                     onComplete(false, "Hitilafu: ${e.message}")
+
                 }
             }
         }
     }
-
     fun logoutUser() {
         viewModelScope.launch(Dispatchers.IO) {
             repository.clearAllLocalData(preserveDemo = true)
+            repository.ensureBuiltinMaterialsSeeded("")
         }
         preferences.clearAuthSession()
         _userAccount.value = null
@@ -618,31 +648,31 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
         _isUserRegistered.value = false
         _isLocked.value = true
         _isPasswordConfigured.value = false
-    }
 
+    }
     fun refreshLicenseInfo() {
         _licenseInfo.value = preferences.getLicenseInfo()
-    }
 
+    }
     fun toggleDarkMode() {
         val next = !_isDarkMode.value
         _isDarkMode.value = next
         preferences.setDarkMode(next)
-    }
 
+    }
     fun toggleLanguage() {
         val next = if (_language.value == "sw") "en" else "sw"
         _language.value = next
         preferences.setLanguage(next)
-    }
 
+    }
     fun updateBusinessSettings(newSettings: BusinessSettings) {
         preferences.saveBusinessSettings(newSettings)
         _businessSettings.value = newSettings
         // Sync updated business profile to cloud
         syncDataToCloud()
-    }
 
+    }
     fun activateLicense(key: String, customerName: String? = null): Pair<Boolean, String> {
         val result = preferences.activateLicense(key, customerName)
         refreshLicenseInfo()
@@ -659,50 +689,30 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             }
         }
         return result
-    }
 
-    fun generateLicenseForClient(
-        customerName: String,
-        type: LicenseType,
-        deviceId: String? = null,
-        durationDays: Int? = null
-    ): AdminGeneratedLicense {
-        val (code, license) = LicensingEngine.generateActivationCode(
-            customerName = customerName,
-            licenseType = type,
-            deviceId = deviceId,
-            customDurationDays = durationDays
-        )
-        preferences.saveAdminGeneratedLicense(license)
-        _adminGeneratedLicenses.value = preferences.getAdminGeneratedLicenses()
-        return license
     }
-
-    fun deleteAdminGeneratedLicense(id: String) {
-        preferences.deleteAdminGeneratedLicense(id)
-        _adminGeneratedLicenses.value = preferences.getAdminGeneratedLicenses()
-    }
-
     fun getNextQuoteNumber(): String {
-        val quoteList = quotes.value.filter { it.status == "quotation" }
+        val quoteList = quotes.value.filter { it.status == "quotation" 
+        }
         val numbers = quoteList.mapNotNull { q ->
             val numPart = q.number.replace(Regex("[^0-9]"), "")
             numPart.toIntOrNull()
         }
         val nextNum = if (numbers.isEmpty()) 1 else (numbers.maxOrNull()!! + 1)
         return String.format("QTN-%03d", nextNum)
-    }
 
+    }
     fun getNextInvoiceNumber(): String {
-        val invoiceList = quotes.value.filter { it.status == "invoice" }
+        val invoiceList = quotes.value.filter { it.status == "invoice" 
+        }
         val numbers = invoiceList.mapNotNull { q ->
             val numPart = q.number.replace(Regex("[^0-9]"), "")
             numPart.toIntOrNull()
         }
         val nextNum = if (numbers.isEmpty()) 1 else (numbers.maxOrNull()!! + 1)
         return String.format("INV-%03d", nextNum)
-    }
 
+    }
     // Material Operations
     fun insertMaterial(material: MaterialEntity) {
         val currentUid = userAccount.value?.userId ?: ""
@@ -713,25 +723,25 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             )
             repository.insertMaterial(toInsert)
             triggerAutoSync(silent = true, delayMs = 600L)
+
         }
     }
-
     fun updateMaterial(material: MaterialEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.updateMaterial(material)
             triggerAutoSync(silent = true, delayMs = 600L)
+
         }
     }
-
     fun deleteMaterial(material: MaterialEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteMaterial(material)
             val currentUid = userAccount.value?.userId ?: ""
             cloudService.deleteMaterialFromCloud(material.id, currentUid)
             triggerAutoSync(silent = true, delayMs = 600L)
+
         }
     }
-
     fun deleteAllMaterials(onComplete: () -> Unit = {}) {
         val currentUid = userAccount.value?.userId ?: ""
         viewModelScope.launch(Dispatchers.IO) {
@@ -742,10 +752,10 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             triggerAutoSync(silent = true, delayMs = 400L)
             withContext(Dispatchers.Main) {
                 onComplete()
+
             }
         }
     }
-
     fun deleteMaterialsByCategory(category: String, onComplete: () -> Unit = {}) {
         val currentUid = userAccount.value?.userId ?: ""
         viewModelScope.launch(Dispatchers.IO) {
@@ -760,10 +770,10 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             triggerAutoSync(silent = true, delayMs = 400L)
             withContext(Dispatchers.Main) {
                 onComplete()
+
             }
         }
     }
-
     suspend fun changePassword(
         currentPassword: String,
         newPassword: String
@@ -783,9 +793,9 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
         } else {
             val errorMsg = result.errorMessage ?: (if (lang == "sw") "Imeshindwa kubadili nenosiri" else "Failed to change password")
             Pair(false, errorMsg)
+
         }
     }
-
     fun deleteDemoData(onComplete: () -> Unit = {}) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteDemoData()
@@ -795,90 +805,90 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
             preferences.setDemoDataInitialized(true)
             withContext(Dispatchers.Main) {
                 onComplete()
+
             }
         }
     }
-
     suspend fun importMaterialsFromExcel(inputStream: java.io.InputStream): com.example.ui.utils.ExcelImportReport {
         val currentUid = userAccount.value?.userId ?: ""
         return withContext(Dispatchers.IO) {
             repository.importMaterialsFromExcel(inputStream, currentUid)
+
         }
     }
-
     // Customer Operations
     fun insertCustomer(customer: CustomerEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.insertCustomer(customer)
             triggerAutoSync(silent = true, delayMs = 600L)
+
         }
     }
-
     fun updateCustomer(customer: CustomerEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.updateCustomer(customer)
             triggerAutoSync(silent = true, delayMs = 600L)
+
         }
     }
-
     fun deleteCustomer(customer: CustomerEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteCustomer(customer)
             val currentUid = userAccount.value?.userId ?: ""
             cloudService.deleteCustomerFromCloud(customer.id, currentUid)
             triggerAutoSync(silent = true, delayMs = 600L)
+
         }
     }
-
     // Quote Operations
     fun insertQuote(quote: QuoteEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.insertQuote(quote)
             triggerAutoSync(silent = true, delayMs = 600L)
+
         }
     }
-
     fun updateQuote(quote: QuoteEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.updateQuote(quote)
             triggerAutoSync(silent = true, delayMs = 600L)
+
         }
     }
-
     fun convertToInvoice(id: Int, newNumber: String) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.convertToInvoice(id, newNumber)
             triggerAutoSync(silent = true, delayMs = 600L)
+
         }
     }
-
     fun setQuotePaidStatus(id: Int, paid: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.setPaidStatus(id, paid)
             triggerAutoSync(silent = true, delayMs = 600L)
+
         }
     }
-
     fun deleteQuote(quote: QuoteEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.deleteQuote(quote)
             val currentUid = userAccount.value?.userId ?: ""
             cloudService.deleteQuoteFromCloud(quote.id, currentUid)
             triggerAutoSync(silent = true, delayMs = 600L)
+
         }
     }
-
     // Backup & Restore
     fun exportBackupJson(): String {
         return runBlocking(Dispatchers.IO) {
             repository.exportAllDataAsJson(
                 materials = materials.value.filter { !com.example.ui.utils.DemoUtils.isDemoMaterial(it) },
                 customers = customers.value.filter { !com.example.ui.utils.DemoUtils.isDemoCustomer(it) },
-                quotes = quotes.value.filter { !com.example.ui.utils.DemoUtils.isDemoQuote(it) }
+                quotes = quotes.value.filter { !com.example.ui.utils.DemoUtils.isDemoQuote(it) } 
             )
+
         }
     }
-
     fun importBackupJson(json: String): Pair<Boolean, String> {
         return runBlocking(Dispatchers.IO) {
             val isSw = _language.value == "sw"
@@ -887,10 +897,10 @@ class AgritechViewModel(application: Application) : AndroidViewModel(application
                 _businessSettings.value = preferences.getBusinessSettings()
             }
             result
+
         }
     }
 }
-
 class AgritechViewModelFactory(
     private val application: Application
 ) : ViewModelProvider.Factory {

@@ -160,7 +160,8 @@ fun MaterialsScreen(
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = if (language == "sw") "Ongeza Kifaa" else "Add Item",
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
                 )
             }
         }
@@ -177,7 +178,13 @@ fun MaterialsScreen(
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                placeholder = { Text(if (language == "sw") "Tafuta kifaa kwa jina..." else "Search material by name...") },
+                textStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp),
+                placeholder = {
+                    Text(
+                        if (language == "sw") "Tafuta kifaa kwa jina..." else "Search material by name...",
+                        fontSize = 16.sp
+                    )
+                },
                 leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = null) },
                 trailingIcon = {
                     if (searchQuery.isNotBlank()) {
@@ -200,14 +207,20 @@ fun MaterialsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 categories.forEach { cat ->
                     val selected = selectedCategory == cat
                     FilterChip(
                         selected = selected,
                         onClick = { selectedCategory = cat },
-                        label = { Text(cat, fontSize = 12.sp) },
+                        label = {
+                            Text(
+                                text = cat,
+                                fontSize = 14.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                            )
+                        },
                         shape = RoundedCornerShape(8.dp)
                     )
                 }
@@ -223,7 +236,7 @@ fun MaterialsScreen(
             ) {
                 Text(
                     text = if (language == "sw") "Jumla: ${filteredMaterials.size}" else "Total: ${filteredMaterials.size}",
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
@@ -253,7 +266,7 @@ fun MaterialsScreen(
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = if (language == "sw") "Futa Vifaa" else "Delete Options",
-                                    fontSize = 12.sp,
+                                    fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = RoseError
                                 )
@@ -302,6 +315,7 @@ fun MaterialsScreen(
                                     text = {
                                         Text(
                                             text = if (language == "sw") "Futa Vifaa vya Umeme ($electCount)" else "Delete Electrical Materials ($electCount)",
+                                            fontSize = 14.sp,
                                             fontWeight = FontWeight.Medium
                                         )
                                     },
@@ -320,6 +334,7 @@ fun MaterialsScreen(
                                     text = {
                                         Text(
                                             text = if (language == "sw") "Futa Vifaa vya Mabomba ($plumbCount)" else "Delete Plumbing Materials ($plumbCount)",
+                                            fontSize = 14.sp,
                                             fontWeight = FontWeight.Medium
                                         )
                                     },
@@ -338,6 +353,7 @@ fun MaterialsScreen(
                                     text = {
                                         Text(
                                             text = if (language == "sw") "Futa Vifaa vya Ujenzi ($constCount)" else "Delete Construction Materials ($constCount)",
+                                            fontSize = 14.sp,
                                             fontWeight = FontWeight.Medium
                                         )
                                     },
@@ -403,7 +419,7 @@ fun MaterialsScreen(
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = if (language == "sw") "Ingiza Excel" else "Import Excel",
-                                fontSize = 12.sp,
+                                fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -438,7 +454,7 @@ fun MaterialsScreen(
                             } else {
                                 if (language == "sw") "Hakuna vifaa vilivyopo katika kundi hili." else "No materials found in this category."
                             },
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp),
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -761,17 +777,21 @@ private fun MaterialItemCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
+                .padding(14.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = material.name,
-                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        lineHeight = 23.sp
+                    ),
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -782,34 +802,40 @@ private fun MaterialItemCard(
                     ) {
                         Text(
                             text = material.category,
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                             color = MaterialTheme.colorScheme.primary
                         )
                     }
                     Text(
                         text = "${material.unit} • ${Formatters.formatCurrency(material.price)}",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium
+                        ),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                IconButton(onClick = onEdit, modifier = Modifier.size(36.dp)) {
+                IconButton(onClick = onEdit, modifier = Modifier.size(40.dp)) {
                     Icon(
                         imageVector = Icons.Default.Edit,
                         contentDescription = "Edit",
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
-                IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
+                IconButton(onClick = onDelete, modifier = Modifier.size(40.dp)) {
                     Icon(
                         imageVector = Icons.Default.DeleteOutline,
                         contentDescription = "Delete",
                         tint = RoseError,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
