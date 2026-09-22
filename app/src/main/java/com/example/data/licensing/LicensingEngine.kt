@@ -177,7 +177,8 @@ object LicensingEngine {
         val message: String = "",
         val isLifetime: Boolean = false,
         val customerName: String? = null,
-        val licenseId: String? = null
+        val licenseId: String? = null,
+        val status: LicenseStatus = LicenseStatus.ACTIVE
     )
 
     /**
@@ -241,27 +242,20 @@ object LicensingEngine {
             }
 
             // Device Installation ID Matching
-            val currentShortCode = getDeviceShortCode(currentInstallationId)
-            val legacyShortCode = legacyInstallationId?.let { getDeviceShortCode(it) }
-            val targetShortCode = getDeviceShortCode(installId)
-            val isUniversal = installId.equals("UNIVERSAL", ignoreCase = true) || installId.isBlank()
-
             val cleanTarget = installId.replace(Regex("[^A-Za-z0-9]"), "")
             val cleanCurrent = currentInstallationId.replace(Regex("[^A-Za-z0-9]"), "")
             val cleanLegacy = legacyInstallationId?.replace(Regex("[^A-Za-z0-9]"), "")
 
-            val isMatch = isUniversal ||
-                    installId.equals(currentInstallationId, ignoreCase = true) ||
+            val isMatch = installId.equals(currentInstallationId, ignoreCase = true) ||
                     (cleanTarget.isNotEmpty() && cleanTarget.equals(cleanCurrent, ignoreCase = true)) ||
                     (legacyInstallationId != null && installId.equals(legacyInstallationId, ignoreCase = true)) ||
-                    (cleanLegacy != null && cleanTarget.isNotEmpty() && cleanTarget.equals(cleanLegacy, ignoreCase = true)) ||
-                    targetShortCode.equals(currentShortCode, ignoreCase = true) ||
-                    (legacyShortCode != null && targetShortCode.equals(legacyShortCode, ignoreCase = true))
+                    (cleanLegacy != null && cleanTarget.isNotEmpty() && cleanTarget.equals(cleanLegacy, ignoreCase = true))
 
             if (!isMatch) {
                 return VerificationResult(
                     valid = false,
-                    message = "Code hii ya leseni imefungwa kwenye kifaa ($installId). Kifaa hiki ni: $currentInstallationId."
+                    status = LicenseStatus.INVALID_DEVICE,
+                    message = "LICENSE NOT VALID FOR THIS DEVICE"
                 )
             }
 
@@ -316,13 +310,13 @@ object LicensingEngine {
 
             val currentShortCode = getDeviceShortCode(currentInstallationId)
             val legacyShortCode = legacyInstallationId?.let { getDeviceShortCode(it) }
-            val isShortMatch = devSegment == "UNIV" ||
-                    devSegment.equals(currentShortCode, ignoreCase = true) ||
+            val isShortMatch = devSegment.equals(currentShortCode, ignoreCase = true) ||
                     (legacyShortCode != null && devSegment.equals(legacyShortCode, ignoreCase = true))
             if (!isShortMatch) {
                 return VerificationResult(
                     valid = false,
-                    message = "Code hii ya leseni imefungwa kwenye kifaa ($devSegment). Kifaa chako ni: $currentShortCode ($currentInstallationId)."
+                    status = LicenseStatus.INVALID_DEVICE,
+                    message = "LICENSE NOT VALID FOR THIS DEVICE"
                 )
             }
 
@@ -384,8 +378,23 @@ object LicensingEngine {
         return start
     }
 
+    fun checkLocalIntegrity(prefs: SharedPreferences): Boolean {
+        val status = prefs.getString("agritech_firebase_license_status", null)
+        val deviceId = prefs.getString("agritech_firebase_license_device", null)
+        val expiryDate = prefs.getString("agritech_license_expires", null)
+        val key = prefs.getString("agritech_license_key", null)
+        val storedSig = prefs.getString("agritech_license_sig", null)
+
+        if (storedSig == null && status == null && deviceId == null && expiryDate == null && key == null) {
+            return true
+        }
+        val raw = "${status.orEmpty()}|${deviceId.orEmpty()}|${expiryDate.orEmpty()}|${key.orEmpty()}"
+        val expectedSig = com.example.data.security.SecurityUtils.hashPassword(raw, "AGRITECH_LICENSE_INTEGRITY_SALT_2026")
+        return storedSig == expectedSig
+    }
+
     fun getLicenseInfo(prefs: SharedPreferences): LicenseInfo {
-        val isTampered = checkTimeTampering(prefs)
+        val isTampered = checkTimeTampering(prefs) || !checkLocalIntegrity(prefs)
         val installationId = getInstallationId(prefs)
         val trialStartMs = getTrialStartDate(prefs)
         val trialStartStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(trialStartMs))
@@ -393,6 +402,66 @@ object LicensingEngine {
         val now = System.currentTimeMillis()
         val diffDays = ((now - trialStartMs) / (1000 * 60 * 60 * 24)).toInt().coerceAtLeast(0)
         val trialDaysRemaining = (TRIAL_DAYS - diffDays).coerceAtLeast(0)
+
+        val firebaseStatus = prefs.getString("agritech_firebase_license_status", null)
+        val firebaseDevice = prefs.getString("agritech_firebase_license_device", null)
+
+        // Check explicit device mismatch from Firebase
+        if (!firebaseDevice.isNullOrBlank() && !firebaseDevice.equals(installationId, ignoreCase = true)) {
+            val cleanFb = firebaseDevice.replace(Regex("[^A-Za-z0-9]"), "")
+            val cleanCurrent = installationId.replace(Regex("[^A-Za-z0-9]"), "")
+            if (!cleanFb.equals(cleanCurrent, ignoreCase = true)) {
+                return LicenseInfo(
+                    status = LicenseStatus.INVALID_DEVICE,
+                    installationId = installationId,
+                    trialStartDate = trialStartStr,
+                    trialDaysUsed = diffDays,
+                    trialDaysRemaining = 0,
+                    isLicensed = false,
+                    isTampered = isTampered
+                )
+            }
+        }
+
+        // Check explicit Firebase license statuses
+        when (firebaseStatus?.uppercase(Locale.ROOT)) {
+            "DISABLED" -> return LicenseInfo(
+                status = LicenseStatus.DISABLED,
+                installationId = installationId,
+                trialStartDate = trialStartStr,
+                trialDaysUsed = diffDays,
+                trialDaysRemaining = 0,
+                isLicensed = false,
+                isTampered = isTampered
+            )
+            "REVOKED" -> return LicenseInfo(
+                status = LicenseStatus.REVOKED,
+                installationId = installationId,
+                trialStartDate = trialStartStr,
+                trialDaysUsed = diffDays,
+                trialDaysRemaining = 0,
+                isLicensed = false,
+                isTampered = isTampered
+            )
+            "EXPIRED" -> return LicenseInfo(
+                status = LicenseStatus.EXPIRED,
+                installationId = installationId,
+                trialStartDate = trialStartStr,
+                trialDaysUsed = diffDays,
+                trialDaysRemaining = 0,
+                isLicensed = false,
+                isTampered = isTampered
+            )
+            "INVALID_DEVICE" -> return LicenseInfo(
+                status = LicenseStatus.INVALID_DEVICE,
+                installationId = installationId,
+                trialStartDate = trialStartStr,
+                trialDaysUsed = diffDays,
+                trialDaysRemaining = 0,
+                isLicensed = false,
+                isTampered = isTampered
+            )
+        }
 
         val licenseKey = prefs.getString("agritech_license_key", "") ?: ""
         val savedType = prefs.getString("agritech_license_type", null)
@@ -403,6 +472,20 @@ object LicensingEngine {
         if (licenseKey.isNotBlank()) {
             val legacyId = prefs.getString("agritech_installation_id_legacy", null)
             val verification = verifyActivationCode(licenseKey, installationId, legacyId)
+
+            if (!verification.valid && verification.status == LicenseStatus.INVALID_DEVICE) {
+                return LicenseInfo(
+                    status = LicenseStatus.INVALID_DEVICE,
+                    installationId = installationId,
+                    trialStartDate = trialStartStr,
+                    trialDaysUsed = diffDays,
+                    trialDaysRemaining = 0,
+                    isLicensed = false,
+                    licenseKey = licenseKey,
+                    isTampered = isTampered
+                )
+            }
+
             if (verification.valid) {
                 if (!expiresAt.isNullOrBlank()) {
                     try {
@@ -411,7 +494,7 @@ object LicensingEngine {
                         val expiryMs = expiryDate?.time ?: 0L
                         if (expiryMs > 0 && now > expiryMs) {
                             return LicenseInfo(
-                                status = LicenseStatus.LICENSE_EXPIRED,
+                                status = LicenseStatus.EXPIRED,
                                 installationId = installationId,
                                 trialStartDate = trialStartStr,
                                 trialDaysUsed = diffDays,
@@ -457,7 +540,7 @@ object LicensingEngine {
                     trialDaysUsed = diffDays,
                     trialDaysRemaining = 0,
                     isLicensed = true,
-                    licenseType = LicenseType.LIFETIME,
+                    licenseType = verification.licenseType ?: LicenseType.LIFETIME,
                     licenseKey = licenseKey,
                     customerName = verification.customerName ?: customerName,
                     activatedAt = activatedAt,

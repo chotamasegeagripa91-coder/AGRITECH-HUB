@@ -201,7 +201,11 @@ fun QuotePrintPreviewDialog(
                             .verticalScroll(rememberScrollState())
                             .padding(16.dp)
                     ) {
-                        // Document Header Banner (Dark Slate #0F172A matching PDF)
+                        val logoBitmap: Bitmap? = remember(businessSettings.logoPath) {
+                            ImageUtils.loadLogoBitmap(businessSettings.logoPath, 120)
+                        }
+
+                        // 1. SECTION 1: COMPANY DETAILS (Independent dedicated banner at top)
                         Surface(
                             color = Color(0xFF0F172A),
                             shape = RoundedCornerShape(8.dp),
@@ -211,108 +215,61 @@ fun QuotePrintPreviewDialog(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.Top
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                val logoBitmap: Bitmap? = remember(businessSettings.logoPath) {
-                                    ImageUtils.loadLogoBitmap(businessSettings.logoPath, 120)
+                                if (logoBitmap != null) {
+                                    Image(
+                                        bitmap = logoBitmap.asImageBitmap(),
+                                        contentDescription = "Company Logo",
+                                        modifier = Modifier
+                                            .size(46.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color.White)
+                                            .padding(2.dp)
+                                    )
                                 }
 
-                                Row(
-                                    modifier = Modifier.weight(1.2f),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    if (logoBitmap != null) {
-                                        Image(
-                                            bitmap = logoBitmap.asImageBitmap(),
-                                            contentDescription = "Logo",
-                                            modifier = Modifier
-                                                .size(44.dp)
-                                                .clip(RoundedCornerShape(6.dp))
-                                                .background(Color.White)
-                                                .padding(2.dp)
-                                        )
-                                    }
-
-                                    Column {
-                                        Text(
-                                            text = businessSettings.name.uppercase(),
-                                            color = AmberPrimary,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Black
-                                        )
-                                        if (businessSettings.slogan.isNotBlank()) {
-                                            Text(
-                                                text = businessSettings.slogan,
-                                                color = Color(0xFF94A3B8),
-                                                fontSize = 9.sp,
-                                                fontStyle = FontStyle.Italic
-                                            )
-                                        }
-                                        Text(
-                                            text = "Tel: ${businessSettings.phone1}" + if (businessSettings.phone2.isNotBlank()) " / ${businessSettings.phone2}" else "",
-                                            color = Color(0xFFCBD5E1),
-                                            fontSize = 9.sp
-                                        )
-                                        if (businessSettings.email.isNotBlank()) {
-                                            Text(
-                                                text = "Email: ${businessSettings.email}",
-                                                color = Color(0xFFCBD5E1),
-                                                fontSize = 9.sp
-                                            )
-                                        }
-                                        if (businessSettings.address.isNotBlank()) {
-                                            Text(
-                                                text = "Loc: ${businessSettings.address}",
-                                                color = Color(0xFFCBD5E1),
-                                                fontSize = 9.sp
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Column(horizontalAlignment = Alignment.End) {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = if (isInvoice) (if (language == "sw") "ANKARA RASMI" else "TAX INVOICE") else (if (language == "sw") "MAKADIRIO" else "QUOTATION"),
+                                        text = businessSettings.name.uppercase(),
                                         color = AmberPrimary,
-                                        fontSize = 13.sp,
+                                        fontSize = 14.sp,
                                         fontWeight = FontWeight.Black
                                     )
-                                    Text(
-                                        text = quote.number,
-                                        color = Color.White,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        text = "${if (language == "sw") "Tarehe" else "Date"}: ${quote.date}",
-                                        color = Color(0xFF94A3B8),
-                                        fontSize = 9.sp
-                                    )
-                                    if (quote.validUntil.isNotBlank()) {
+                                    if (businessSettings.slogan.isNotBlank()) {
                                         Text(
-                                            text = "${if (language == "sw") "Mwisho" else "Valid"}: ${quote.validUntil}",
+                                            text = businessSettings.slogan,
                                             color = Color(0xFF94A3B8),
-                                            fontSize = 9.sp
+                                            fontSize = 9.sp,
+                                            fontStyle = FontStyle.Italic
                                         )
                                     }
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
-                                        text = if (isInvoice) {
-                                            if (quote.paid) (if (language == "sw") "PAID / IMELIPWA" else "PAID") else (if (language == "sw") "UNPAID / HAIJALIPWA" else "UNPAID")
-                                        } else {
-                                            if (language == "sw") "ACTIVE / HAI" else "ACTIVE"
-                                        },
-                                        color = if (isInvoice && !quote.paid) RoseError else EmeraldSuccess,
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold
+                                        text = "Tel: ${businessSettings.phone1}" + if (businessSettings.phone2.isNotBlank()) " / ${businessSettings.phone2}" else "",
+                                        color = Color(0xFFCBD5E1),
+                                        fontSize = 9.sp
                                     )
+                                    if (businessSettings.email.isNotBlank()) {
+                                        Text(
+                                            text = "Email: ${businessSettings.email}",
+                                            color = Color(0xFFCBD5E1),
+                                            fontSize = 9.sp
+                                        )
+                                    }
+                                    if (businessSettings.address.isNotBlank()) {
+                                        Text(
+                                            text = "Loc: ${businessSettings.address}",
+                                            color = Color(0xFFCBD5E1),
+                                            fontSize = 9.sp
+                                        )
+                                    }
                                 }
                             }
                         }
 
-                        // Gold Accent line under header
+                        // Gold accent line under company banner
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -320,9 +277,79 @@ fun QuotePrintPreviewDialog(
                                 .background(AmberPrimary)
                         )
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
 
-                        // Customer Details Box
+                        // 2. SECTION 2: QUOTATION / INVOICE DETAILS (Dedicated independent section)
+                        Surface(
+                            color = Color(0xFF1E293B),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = if (isInvoice) (if (language == "sw") "ANKARA RASMI" else "TAX INVOICE") else (if (language == "sw") "MAKADIRIO (QUOTATION)" else "OFFICIAL QUOTATION"),
+                                        color = AmberPrimary,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                    Text(
+                                        text = quote.number,
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            text = "${if (language == "sw") "Tarehe" else "Date"}: ${quote.date}",
+                                            color = Color(0xFFCBD5E1),
+                                            fontSize = 9.5.sp
+                                        )
+                                        if (quote.validUntil.isNotBlank()) {
+                                            Text(
+                                                text = "${if (language == "sw") "Mwisho" else "Valid Until"}: ${quote.validUntil}",
+                                                color = Color(0xFF94A3B8),
+                                                fontSize = 9.sp
+                                            )
+                                        }
+                                    }
+
+                                    Surface(
+                                        color = if (isInvoice && !quote.paid) RoseError.copy(alpha = 0.2f) else EmeraldSuccess.copy(alpha = 0.2f),
+                                        shape = RoundedCornerShape(4.dp),
+                                        border = BorderStroke(1.dp, if (isInvoice && !quote.paid) RoseError else EmeraldSuccess)
+                                    ) {
+                                        Text(
+                                            text = if (isInvoice) {
+                                                if (quote.paid) (if (language == "sw") "PAID" else "PAID") else (if (language == "sw") "UNPAID" else "UNPAID")
+                                            } else {
+                                                if (language == "sw") "ACTIVE" else "ACTIVE"
+                                            },
+                                            color = if (isInvoice && !quote.paid) RoseError else EmeraldSuccess,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // 3. SECTION 3: CUSTOMER DETAILS (Dedicated independent section)
                         Surface(
                             color = Color(0xFFF8FAFC),
                             shape = RoundedCornerShape(6.dp),
@@ -359,7 +386,7 @@ fun QuotePrintPreviewDialog(
                                 if (quote.description.isNotBlank()) {
                                     Column(horizontalAlignment = Alignment.End, modifier = Modifier.weight(0.8f)) {
                                         Text(
-                                            text = if (language == "sw") "MAELEZO YA KAZI:" else "PROJECT / TASK:",
+                                            text = if (language == "sw") "MAELEZO YA KAZI / MRADI:" else "PROJECT / WORK DESCRIPTION:",
                                             fontSize = 9.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = Color(0xFF64748B)
@@ -605,7 +632,7 @@ fun generatePrintableHtml(
     val isSw = language == "sw"
     val itemsRows = items.mapIndexed { idx, item ->
         """
-        <tr style="background-color: ${if (idx % 2 == 0) "#ffffff" else "#f8fafc"};">
+        <tr style="background-color: ${if (idx % 2 == 0) "#ffffff" else "#f8fafc"}; page-break-inside: avoid;">
             <td style="padding: 7px 8px; border-bottom: 1px solid #e2e8f0; text-align: center; color: #64748b;">${idx + 1}</td>
             <td style="padding: 7px 8px; border-bottom: 1px solid #e2e8f0; font-weight: 500; color: #0f172a;">${item.name}</td>
             <td style="padding: 7px 8px; border-bottom: 1px solid #e2e8f0; text-align: center; color: #475569;">${item.quantity.toInt()} ${item.unit}</td>
@@ -617,7 +644,7 @@ fun generatePrintableHtml(
 
     val labourRowHtml = if (quote.labour > 0.0) {
         """
-        <tr style="background-color: #fefce8; border-bottom: 1px solid #e2e8f0;">
+        <tr style="background-color: #fefce8; border-bottom: 1px solid #e2e8f0; page-break-inside: avoid;">
             <td style="padding: 7px 8px; text-align: center; color: #b45309; font-weight: bold;">•</td>
             <td style="padding: 7px 8px; font-weight: bold; color: #0f172a;">${if (isSw) "Gharama ya Ufundi na Kazi (Labour & Installation Charges)" else "Labour, Workmanship & Installation Charges"}</td>
             <td style="padding: 7px 8px; text-align: center; color: #64748b;">-</td>
@@ -634,57 +661,71 @@ fun generatePrintableHtml(
         <meta charset="utf-8">
         <title>${quote.number}</title>
         <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 20px; color: #0f172a; font-size: 12px; }
-            .header-banner { background: #0f172a; color: #ffffff; padding: 16px 20px; border-radius: 8px; display: flex; justify-content: space-between; align-items: flex-start; }
-            .brand-title { color: #f59e0b; font-size: 16px; font-weight: 900; margin: 0 0 3px 0; text-transform: uppercase; letter-spacing: 0.5px; }
-            .brand-slogan { color: #94a3b8; font-size: 11px; font-style: italic; margin: 0 0 5px 0; }
+            @page { margin: 15mm 12mm; size: auto; }
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 10px; color: #0f172a; font-size: 12px; }
+            .company-banner { background: #0f172a; color: #ffffff; padding: 14px 18px; border-radius: 8px; }
+            .brand-title { color: #f59e0b; font-size: 16px; font-weight: 900; margin: 0 0 2px 0; text-transform: uppercase; letter-spacing: 0.5px; }
+            .brand-slogan { color: #94a3b8; font-size: 10.5px; font-style: italic; margin: 0 0 4px 0; }
             .brand-contacts { color: #cbd5e1; font-size: 10px; line-height: 1.4; margin: 0; }
-            .doc-meta { text-align: right; }
-            .doc-type { color: #f59e0b; font-size: 16px; font-weight: 900; margin: 0 0 3px 0; text-transform: uppercase; }
-            .doc-number { color: #ffffff; font-size: 12px; font-weight: bold; margin: 0 0 3px 0; }
-            .doc-date { color: #94a3b8; font-size: 10px; margin: 0; }
-            .status-badge { color: ${if (isInvoice && !quote.paid) "#ef4444" else "#10b981"}; font-weight: bold; font-size: 10px; margin-top: 4px; }
-            .gold-line { height: 3px; background: #eab308; margin: 8px 0 14px 0; border-radius: 2px; }
-            .client-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px 16px; margin-bottom: 14px; display: flex; justify-content: space-between; }
-            .client-label { color: #d97706; font-size: 10px; font-weight: bold; margin-bottom: 4px; }
-            .client-name { font-size: 13px; font-weight: bold; color: #0f172a; text-transform: uppercase; }
-            .client-info { font-size: 11px; color: #475569; margin-top: 2px; }
-            table.items { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11.5px; }
-            table.items th { background: #0f172a; color: #f59e0b; padding: 8px; text-align: left; font-size: 11px; text-transform: uppercase; }
-            .bottom-section { display: flex; justify-content: space-between; margin-top: 16px; align-items: flex-start; }
+            .gold-line { height: 3px; background: #eab308; margin: 6px 0 10px 0; border-radius: 2px; }
+            .doc-section { background: #1e293b; color: #ffffff; padding: 10px 16px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+            .doc-type { color: #f59e0b; font-size: 14px; font-weight: 900; margin: 0 0 2px 0; text-transform: uppercase; }
+            .doc-number { color: #ffffff; font-size: 13px; font-weight: bold; margin: 0; }
+            .doc-meta-right { text-align: right; }
+            .doc-date { color: #cbd5e1; font-size: 10px; margin: 0; }
+            .status-badge { display: inline-block; padding: 2px 6px; border-radius: 4px; border: 1px solid ${if (isInvoice && !quote.paid) "#ef4444" else "#10b981"}; color: ${if (isInvoice && !quote.paid) "#ef4444" else "#10b981"}; font-weight: bold; font-size: 9px; margin-top: 2px; }
+            .client-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; display: flex; justify-content: space-between; }
+            .client-label { color: #d97706; font-size: 9.5px; font-weight: bold; margin-bottom: 3px; }
+            .client-name { font-size: 12.5px; font-weight: bold; color: #0f172a; text-transform: uppercase; }
+            .client-info { font-size: 10.5px; color: #475569; margin-top: 2px; }
+            table.items { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 11px; }
+            table.items thead { display: table-header-group; }
+            table.items tr { page-break-inside: avoid; }
+            table.items th { background: #0f172a; color: #f59e0b; padding: 7px 8px; text-align: left; font-size: 10.5px; text-transform: uppercase; }
+            .bottom-section { display: flex; justify-content: space-between; margin-top: 14px; align-items: flex-start; page-break-inside: avoid; }
             .payment-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; width: 48%; }
-            .payment-title { font-size: 10.5px; font-weight: bold; color: #0f172a; margin-bottom: 4px; }
+            .payment-title { font-size: 10px; font-weight: bold; color: #0f172a; margin-bottom: 4px; }
             .totals-box { width: 46%; }
-            .totals-table { width: 100%; font-size: 11.5px; }
+            .totals-table { width: 100%; font-size: 11px; }
             .totals-table td { padding: 3px 0; }
-            .grand-total-banner { background: #0f172a; color: #ffffff; padding: 8px 12px; border-radius: 6px; display: flex; justify-content: space-between; font-weight: bold; font-size: 13px; margin-top: 6px; }
-            .grand-total-amount { color: #f59e0b; font-size: 14px; font-weight: 900; }
-            .footer-line { height: 2px; background: #eab308; margin: 20px 0 12px 0; }
-            .footer-row { display: flex; justify-content: space-between; align-items: center; font-size: 10px; }
+            .grand-total-banner { background: #0f172a; color: #ffffff; padding: 7px 10px; border-radius: 5px; display: flex; justify-content: space-between; font-weight: bold; font-size: 12px; margin-top: 5px; }
+            .grand-total-amount { color: #f59e0b; font-size: 13px; font-weight: 900; }
+            .footer-line { height: 2px; background: #eab308; margin: 16px 0 10px 0; }
+            .footer-row { display: flex; justify-content: space-between; align-items: center; font-size: 9.5px; page-break-inside: avoid; }
+            @media print {
+                body { margin: 0; }
+                .company-banner, .doc-section, .client-box, table.items, .bottom-section, .footer-row { page-break-inside: avoid; }
+            }
         </style>
     </head>
     <body>
-        <div class="header-banner">
-            <div>
-                <div class="brand-title">${business.name}</div>
-                <div class="brand-slogan">${business.slogan}</div>
-                <div class="brand-contacts">
-                    Tel: ${business.phone1}${if (business.phone2.isNotBlank()) " / " + business.phone2 else ""}<br>
-                    Email: ${business.email}<br>
-                    Loc: ${business.address}
-                </div>
-            </div>
-            <div class="doc-meta">
-                <div class="doc-type">${if (isInvoice) (if (isSw) "ANKARA RASMI" else "TAX INVOICE") else (if (isSw) "MAKADIRIO" else "QUOTATION")}</div>
-                <div class="doc-number">${quote.number}</div>
-                <div class="doc-date">${if (isSw) "Tarehe" else "Date"}: ${quote.date}</div>
-                ${if (!isInvoice && quote.validUntil.isNotBlank()) "<div class='doc-date'>" + (if (isSw) "Mwisho" else "Valid") + ": " + quote.validUntil + "</div>" else ""}
-                <div class="status-badge">${if (isInvoice) (if (quote.paid) (if (isSw) "PAID / IMELIPWA" else "PAID") else (if (isSw) "UNPAID / HAIJALIPWA" else "UNPAID")) else (if (isSw) "ACTIVE / HAI" else "ACTIVE")}</div>
+        <!-- 1. SECTION 1: COMPANY DETAILS -->
+        <div class="company-banner">
+            <div class="brand-title">${business.name}</div>
+            ${if (business.slogan.isNotBlank()) "<div class='brand-slogan'>" + business.slogan + "</div>" else ""}
+            <div class="brand-contacts">
+                Tel: ${business.phone1}${if (business.phone2.isNotBlank()) " / " + business.phone2 else ""}<br>
+                ${if (business.email.isNotBlank()) "Email: " + business.email + "<br>" else ""}
+                ${if (business.address.isNotBlank()) "Loc: " + business.address else ""}
             </div>
         </div>
 
         <div class="gold-line"></div>
 
+        <!-- 2. SECTION 2: QUOTATION / INVOICE DETAILS -->
+        <div class="doc-section">
+            <div>
+                <div class="doc-type">${if (isInvoice) (if (isSw) "ANKARA RASMI" else "TAX INVOICE") else (if (isSw) "MAKADIRIO (QUOTATION)" else "OFFICIAL QUOTATION")}</div>
+                <div class="doc-number">${quote.number}</div>
+            </div>
+            <div class="doc-meta-right">
+                <div class="doc-date">${if (isSw) "Tarehe" else "Date"}: ${quote.date}</div>
+                ${if (quote.validUntil.isNotBlank()) "<div class='doc-date'>" + (if (isSw) "Mwisho" else "Valid Until") + ": " + quote.validUntil + "</div>" else ""}
+                <div class="status-badge">${if (isInvoice) (if (quote.paid) "PAID" else "UNPAID") else "ACTIVE"}</div>
+            </div>
+        </div>
+
+        <!-- 3. SECTION 3: CUSTOMER DETAILS -->
         <div class="client-box">
             <div>
                 <div class="client-label">${if (isSw) "MTEJA / CLIENT / BILL TO:" else "CLIENT / BILL TO:"}</div>
@@ -693,12 +734,13 @@ fun generatePrintableHtml(
             </div>
             ${if (quote.description.isNotBlank()) """
             <div style="text-align: right;">
-                <div class="client-label">${if (isSw) "MAELEZO YA KAZI:" else "PROJECT / TASK:"}</div>
-                <div style="color: #0f172a; font-size: 11px;">${quote.description}</div>
+                <div class="client-label">${if (isSw) "MAELEZO YA KAZI / MRADI:" else "PROJECT / WORK DESCRIPTION:"}</div>
+                <div style="color: #0f172a; font-size: 10.5px;">${quote.description}</div>
             </div>
             """ else ""}
         </div>
 
+        <!-- 4. MATERIALS TABLE -->
         <table class="items">
             <thead>
                 <tr>
@@ -715,11 +757,12 @@ fun generatePrintableHtml(
             </tbody>
         </table>
 
+        <!-- 5. BOTTOM SECTION (TERMS / ACCOUNTS & TOTALS) -->
         <div class="bottom-section">
             ${if (isInvoice) """
             <div class="payment-box">
                 <div class="payment-title">${if (isSw) "AKAUNTI ZA MALIPO / PAYMENT DETAILS" else "PAYMENT ACCOUNT / BANK DETAILS"}</div>
-                <div style="font-size: 10px; color: #475569; line-height: 1.4;">
+                <div style="font-size: 9.5px; color: #475569; line-height: 1.4;">
                     ${if (business.lipaNumber.isNotBlank()) "<div>" + business.lipaNumber + "</div>" else ""}
                     ${if (business.bankName.isNotBlank() || business.bankAccountNumber.isNotBlank()) "<div>" + business.bankName + ": " + business.bankAccountNumber + "</div>" else ""}
                     ${if (business.bankAccountName.isNotBlank()) "<div>(" + business.bankAccountName + ")</div>" else ""}
@@ -729,7 +772,7 @@ fun generatePrintableHtml(
             """ else """
             <div class="payment-box">
                 <div class="payment-title">${if (isSw) "MASHARTI YA MAKADIRIO" else "QUOTATION TERMS"}</div>
-                <div style="font-size: 9.5px; color: #475569; line-height: 1.4;">
+                <div style="font-size: 9px; color: #475569; line-height: 1.4;">
                     ${if (isSw) "Haya makadirio (Quotation) ni halali kwa siku 14 pekee kuanzia tarehe iliyotolewa. Baada ya hapo, bei zinaweza kubadilika kulingana na hali ya soko." else "This quotation is valid for 14 days only from the date of issue. Thereafter, prices are subject to change according to market conditions."}
                 </div>
             </div>
@@ -755,6 +798,7 @@ fun generatePrintableHtml(
 
         <div class="footer-line"></div>
 
+        <!-- 6. FOOTER ROW -->
         <div class="footer-row">
             <div>
                 <div style="color: #b45309; font-weight: bold;">${if (isSw) "Asante kwa kuchagua " + business.name else "Thank you for trusting " + business.name}</div>

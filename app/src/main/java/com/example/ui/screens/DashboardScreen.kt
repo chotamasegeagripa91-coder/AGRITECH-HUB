@@ -77,8 +77,9 @@ fun DashboardScreen(
             }
             val statusText = when (licenseInfo.status) {
                 LicenseStatus.ACTIVE, LicenseStatus.TRIAL -> "ACTIVE"
-                LicenseStatus.TRIAL_EXPIRED, LicenseStatus.LICENSE_EXPIRED -> "EXPIRED"
+                LicenseStatus.TRIAL_EXPIRED, LicenseStatus.LICENSE_EXPIRED, LicenseStatus.EXPIRED -> "EXPIRED"
                 LicenseStatus.TAMPERED -> "TAMPERED"
+                else -> "LOCKED"
             }
             val daysRemainingText = when {
                 isTrial -> "${licenseInfo.trialDaysRemaining}"

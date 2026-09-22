@@ -86,6 +86,17 @@ object AppStrings {
             "lbl_mobile_money" -> if (isSw) "Mitandao ya Simu (M-Pesa / Tigo / Airtel)" else "Mobile Money (M-Pesa / Tigo / Airtel)"
             "powered_by" -> "Powered by Agritech"
 
+            // Draft Quotations
+            "draft_quotations" -> if (isSw) "Rasimu za Makadirio" else "Draft Quotations"
+            "draft_tag" -> if (isSw) "RASIMU" else "DRAFT"
+            "draft_quote_desc" -> if (isSw) "Makadirio ambayo hayajakamilika. Gusa kuendelea nayo." else "Unfinished quotations. Tap to continue editing."
+            "resume_draft" -> if (isSw) "Endelea na Rasimu" else "Resume Draft"
+            "delete_draft" -> if (isSw) "Futa Rasimu" else "Delete Draft"
+            "delete_draft_confirm" -> if (isSw) "Je, una uhakika unataka kufuta rasimu hii ya makadirio?" else "Are you sure you want to delete this draft quotation?"
+            "draft_auto_saved" -> if (isSw) "Rasimu Imehifadhiwa" else "Draft Saved"
+            "no_drafts" -> if (isSw) "Hakuna rasimu zilizohifadhiwa" else "No saved drafts"
+            "open_draft" -> if (isSw) "Fungua Rasimu" else "Open Draft"
+
             else -> key
         }
     }

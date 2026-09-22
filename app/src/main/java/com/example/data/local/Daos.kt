@@ -98,13 +98,13 @@ interface CustomerDao {
     @Query("DELETE FROM customers")
     suspend fun deleteAll()
 
-    @Query("DELETE FROM customers WHERE name LIKE '%[DEMO / SAMPLE]%' OR notes LIKE '%[DEMO / SAMPLE]%' OR name LIKE '%Demo%' OR notes LIKE '%Demo%'")
+    @Query("DELETE FROM customers WHERE name LIKE '%[DEMO%' OR name LIKE '%[SAMPLE%' OR notes LIKE '%[DEMO%' OR notes LIKE '%[SAMPLE%' OR name LIKE '%Demo%' OR name LIKE '%Sample%' OR notes LIKE '%Demo%' OR notes LIKE '%Sample%' OR name LIKE '%Mfano%' OR notes LIKE '%Mfano%'")
     suspend fun deleteDemoCustomers()
 
     @Query("SELECT COUNT(*) FROM customers")
     suspend fun getCount(): Int
 
-    @Query("SELECT COUNT(*) FROM customers WHERE name LIKE '%[DEMO / SAMPLE]%' OR notes LIKE '%[DEMO / SAMPLE]%'")
+    @Query("SELECT COUNT(*) FROM customers WHERE name LIKE '%[DEMO%' OR name LIKE '%[SAMPLE%' OR name LIKE '%Demo%' OR name LIKE '%Sample%'")
     suspend fun getDemoCount(): Int
 }
 
@@ -140,7 +140,7 @@ interface QuoteDao {
     @Query("DELETE FROM quotes")
     suspend fun deleteAll()
 
-    @Query("DELETE FROM quotes WHERE number LIKE 'DEMO-%' OR description LIKE '%Demo%' OR customerName LIKE '%Demo%'")
+    @Query("DELETE FROM quotes WHERE number LIKE 'DEMO-%' OR number LIKE 'SAMPLE-%' OR description LIKE '%Demo%' OR description LIKE '%Sample%' OR description LIKE '%Mfano%' OR customerName LIKE '%Demo%' OR customerName LIKE '%Sample%' OR customerName LIKE '%Mfano%'")
     suspend fun deleteDemoQuotes()
 
     @Query("UPDATE quotes SET status = 'invoice', number = :newNumber WHERE id = :id")

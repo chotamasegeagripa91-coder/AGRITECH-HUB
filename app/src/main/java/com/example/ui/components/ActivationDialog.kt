@@ -193,6 +193,7 @@ fun ActivationDialog(
                     LicenseStatus.TRIAL_EXPIRED -> if (language == "sw") "Muda wa Jaribio la Awali Umekwisha! (Jaribio la bure ni mara moja tu mwanzoni). Weka code ya leseni kuendelea." else "Initial Free Trial Ended! (One-time trial for new install only). Please enter license code to continue."
                     LicenseStatus.LICENSE_EXPIRED -> if (language == "sw") "Muda wa Leseni Umekwisha! Tafadhali lipia na uweke code mpya ya leseni kuendelea." else "License Expired! Please renew and enter a license code to continue."
                     LicenseStatus.TAMPERED -> if (language == "sw") "Tahadhari: Tarehe ya Simu Imebadilishwa!" else "Warning: Clock Tampering Detected!"
+                    else -> if (language == "sw") "Leseni Haina Ruhusa kwenye Kifaa Hiki!" else "License Not Valid / Disabled!"
                 }
                 val statusColor = if (licenseInfo.status == LicenseStatus.ACTIVE) EmeraldSuccess else if (licenseInfo.status == LicenseStatus.TRIAL) AmberPrimary else RoseError
 

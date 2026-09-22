@@ -134,4 +134,112 @@ class BackupRestoreTest {
         assertEquals(timestamp, preferences.getLastBackupTimestamp())
         assertEquals(size, preferences.getLastBackupSize())
     }
+
+    @Test
+    fun testGoogleAccountBackupAndRestoreLifecycle() = runBlocking {
+        val testUid = "user_google_12345"
+        val testEmail = "fundi.agritech@gmail.com"
+        preferences.setBackupGoogleAccountEmail(testEmail)
+        preferences.setBackupGoogleAccountUid(testUid)
+
+        assertEquals(testEmail, preferences.getBackupGoogleAccountEmail())
+
+        // 1. Create realistic user data
+        val material1 = MaterialEntity(
+            id = 101,
+            name = "Schneider MCB 16A Single Pole",
+            category = "Switchgear & Distribution",
+            unit = "Pcs",
+            price = 14500.0,
+            userId = testUid
+        )
+        val material2 = MaterialEntity(
+            id = 102,
+            name = "PVC Conduit Pipe 20mm 3m",
+            category = "Conduits & Containment",
+            unit = "Pcs",
+            price = 5500.0,
+            userId = testUid
+        )
+        repository.insertMaterial(material1)
+        repository.insertMaterial(material2)
+
+        val customer = CustomerEntity(
+            id = 201,
+            name = "Baraka Electrical Enterprises",
+            phone = "+255754123456",
+            location = "Mwenge, Dar es Salaam",
+            notes = "Customer since 2024"
+        )
+        repository.insertCustomer(customer)
+
+        val quote = com.example.data.models.QuoteEntity(
+            id = 301,
+            number = "QTN-2026-001",
+            customerId = 201,
+            customerName = "Baraka Electrical Enterprises",
+            customerPhone = "+255754123456",
+            customerLocation = "Mwenge, Dar es Salaam",
+            date = "2026-09-20",
+            validUntil = "2026-10-04",
+            description = "Wiring for new warehouse building",
+            status = "invoice",
+            paid = false,
+            itemsJson = """[{"id":"1","name":"Schneider MCB 16A Single Pole","quantity":10.0,"price":14500.0,"total":145000.0}]""",
+            materialsTotal = 145000.0,
+            labour = 40000.0,
+            grandTotal = 185000.0
+        )
+        repository.insertQuote(quote)
+
+        // Create CloudBackupPayload
+        val payload = com.example.data.models.CloudBackupPayload(
+            version = 1,
+            timestamp = System.currentTimeMillis(),
+            userId = testUid,
+            business = com.example.data.models.BusinessSettings(
+                name = "AGRITECH PRO INSTALLATIONS",
+                phone1 = "+255754123456",
+                email = testEmail
+            ),
+            materials = listOf(material1, material2),
+            customers = listOf(customer),
+            quotes = listOf(quote)
+        )
+
+        // 2. Simulate complete uninstall / new phone / database wipe
+        database.clearAllTables()
+        assertEquals(0, database.materialDao().getAllMaterialsList().size)
+        assertEquals(0, database.customerDao().getAllCustomersList().size)
+        assertEquals(0, database.quoteDao().getAllQuotesList().size)
+
+        // 3. User reinstalls and signs into same Google account -> restoreFromPayload
+        val restoreSuccess = repository.restoreFromPayload(payload, testUid)
+        assertTrue(restoreSuccess)
+
+        // 4. Assert all items returned into Room database
+        val restoredMaterials = database.materialDao().getAllMaterialsList()
+        val restoredCustomers = database.customerDao().getAllCustomersList()
+        val restoredQuotes = database.quoteDao().getAllQuotesList()
+
+        assertTrue(restoredMaterials.isNotEmpty())
+        assertTrue(restoredMaterials.any { it.name == "Schneider MCB 16A Single Pole" })
+        assertTrue(restoredMaterials.any { it.name == "PVC Conduit Pipe 20mm 3m" })
+
+        assertEquals(1, restoredCustomers.size)
+        assertEquals("Baraka Electrical Enterprises", restoredCustomers[0].name)
+        assertEquals("+255754123456", restoredCustomers[0].phone)
+
+        assertEquals(1, restoredQuotes.size)
+        assertEquals("QTN-2026-001", restoredQuotes[0].number)
+        assertEquals("invoice", restoredQuotes[0].status)
+        assertEquals(185000.0, restoredQuotes[0].grandTotal, 0.01)
+
+        // 5. Verify no duplicate IDs on repeated restore
+        repository.restoreFromPayload(payload, testUid)
+        val secondPassCustomers = database.customerDao().getAllCustomersList()
+        val secondPassQuotes = database.quoteDao().getAllQuotesList()
+        assertEquals(1, secondPassCustomers.size)
+        assertEquals(1, secondPassQuotes.size)
+    }
 }

@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -28,10 +29,16 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.data.models.CustomerEntity
+import com.example.data.models.BusinessSettings
 import com.example.data.models.MaterialEntity
+import com.example.data.models.QuoteDraft
 import com.example.data.models.QuoteEntity
 import com.example.data.models.QuoteItem
+import com.example.data.models.parseQuoteItemsFromJson
 import com.example.ui.components.CustomerEditDialog
 import com.example.ui.theme.AmberPrimary
 import com.example.ui.theme.EmeraldSuccess
@@ -51,34 +58,84 @@ fun NewQuoteScreen(
     preselectedCustomer: CustomerEntity?,
     initialQuoteNumber: String = "QTN-001",
     language: String,
+    draftToResume: QuoteDraft? = null,
+    availableDrafts: List<QuoteDraft> = emptyList(),
+    businessSettings: BusinessSettings = BusinessSettings(),
     onSaveQuote: (QuoteEntity) -> Unit,
-    onAddCustomer: (CustomerEntity) -> Unit
+    onAddCustomer: (CustomerEntity) -> Unit,
+    onAutoSaveDraft: (QuoteDraft) -> Unit = {},
+    onDeleteDraft: (String) -> Unit = {},
+    onSelectDraftToResume: (QuoteDraft) -> Unit = {}
 ) {
     val context = LocalContext.current
 
-    var selectedCustomer by remember { mutableStateOf<CustomerEntity?>(preselectedCustomer ?: customers.firstOrNull()) }
-    var quoteNumber by remember(initialQuoteNumber) { mutableStateOf(initialQuoteNumber) }
-    var date by remember { mutableStateOf(Formatters.getCurrentDateFormatted()) }
-    var validUntil by remember { mutableStateOf(Formatters.getFutureDateFormatted(14)) }
-    var description by remember { mutableStateOf("") }
-    var isLabourAutoCalculated by remember { mutableStateOf(true) }
-    var labourCostText by remember { mutableStateOf("0") }
+    val currentDraftId = remember(draftToResume?.id) { draftToResume?.id ?: UUID.randomUUID().toString() }
+    var isSuccessfullySaved by remember { mutableStateOf(false) }
 
-    val quoteItems = remember { mutableStateListOf<QuoteItem>() }
+    var selectedCustomer by remember(draftToResume?.id) {
+        mutableStateOf<CustomerEntity?>(
+            if (draftToResume != null) {
+                customers.find { it.id == draftToResume.customerId }
+                    ?: customers.find { it.name.equals(draftToResume.customerName, ignoreCase = true) }
+                    ?: if (draftToResume.customerName.isNotBlank()) {
+                        CustomerEntity(
+                            id = draftToResume.customerId ?: 0,
+                            name = draftToResume.customerName,
+                            phone = draftToResume.customerPhone,
+                            location = draftToResume.customerLocation
+                        )
+                    } else null
+            } else {
+                preselectedCustomer ?: customers.firstOrNull()
+            }
+        )
+    }
+    var quoteNumber by remember(draftToResume?.id) {
+        mutableStateOf(draftToResume?.number ?: initialQuoteNumber)
+    }
+    var date by remember(draftToResume?.id) {
+        mutableStateOf(draftToResume?.date?.ifBlank { Formatters.getCurrentDateFormatted() } ?: Formatters.getCurrentDateFormatted())
+    }
+    var validUntil by remember(draftToResume?.id) {
+        mutableStateOf(draftToResume?.validUntil?.ifBlank { Formatters.getFutureDateFormatted(14) } ?: Formatters.getFutureDateFormatted(14))
+    }
+    var description by remember(draftToResume?.id) {
+        mutableStateOf(draftToResume?.description ?: "")
+    }
+    var isLabourAutoCalculated by remember(draftToResume?.id) {
+        mutableStateOf(draftToResume?.isLabourAutoCalculated ?: true)
+    }
+    var labourCostText by remember(draftToResume?.id) {
+        mutableStateOf(
+            if (draftToResume != null && draftToResume.labour > 0) {
+                draftToResume.labour.toLong().toString()
+            } else "0"
+        )
+    }
+
+    val quoteItems = remember(draftToResume?.id) {
+        val list = mutableStateListOf<QuoteItem>()
+        if (draftToResume != null && draftToResume.itemsJson.isNotBlank()) {
+            list.addAll(parseQuoteItemsFromJson(draftToResume.itemsJson))
+        }
+        list
+    }
 
     var showMaterialPickerModal by remember { mutableStateOf(false) }
     var showCustomItemDialog by remember { mutableStateOf(false) }
     var showNewCustomerDialog by remember { mutableStateOf(false) }
     var customerMenuExpanded by remember { mutableStateOf(false) }
+    var showDraftPickerModal by remember { mutableStateOf(false) }
+    var editingItemIndex by remember { mutableStateOf<Int?>(null) }
 
-    // Live calculation: Labour Cost = Total Selected Materials Cost × 40%
+    // Live calculation: Labour Cost = Total Selected Materials Cost × custom percentage
     val materialsTotal = remember(quoteItems.toList()) {
         quoteItems.sumOf { it.total }
     }
 
-    LaunchedEffect(materialsTotal, isLabourAutoCalculated) {
+    LaunchedEffect(materialsTotal, isLabourAutoCalculated, businessSettings.labourPercentage) {
         if (isLabourAutoCalculated) {
-            val autoLabour = (materialsTotal * 0.40).toLong()
+            val autoLabour = (materialsTotal * (businessSettings.labourPercentage / 100.0)).toLong()
             labourCostText = autoLabour.toString()
         }
     }
@@ -90,6 +147,95 @@ fun NewQuoteScreen(
         materialsTotal + labourCost
     }
 
+    // Helper to build current draft object
+    fun buildCurrentDraft(): QuoteDraft? {
+        val itemsSnapshot = quoteItems.toList()
+        val hasContent = itemsSnapshot.isNotEmpty() || description.isNotBlank() || draftToResume != null
+        if (!hasContent) return null
+
+        val itemsArray = JSONArray()
+        for (it in itemsSnapshot) {
+            val obj = JSONObject().apply {
+                put("id", it.id)
+                put("materialId", it.materialId ?: JSONObject.NULL)
+                put("name", it.name)
+                put("unit", it.unit)
+                put("price", it.price)
+                put("quantity", it.quantity)
+                put("total", it.total)
+            }
+            itemsArray.put(obj)
+        }
+
+        return QuoteDraft(
+            id = currentDraftId,
+            number = quoteNumber,
+            date = date,
+            validUntil = validUntil,
+            customerId = selectedCustomer?.id,
+            customerName = selectedCustomer?.name ?: "",
+            customerPhone = selectedCustomer?.phone ?: "",
+            customerLocation = selectedCustomer?.location ?: "",
+            description = description.trim(),
+            itemsJson = itemsArray.toString(),
+            materialsTotal = materialsTotal,
+            isLabourAutoCalculated = isLabourAutoCalculated,
+            labour = labourCost,
+            grandTotal = grandTotal,
+            updatedAt = System.currentTimeMillis()
+        )
+    }
+
+    // 1. Continuous auto-save whenever user updates items, customer, labour or notes
+    LaunchedEffect(
+        selectedCustomer,
+        quoteItems.toList(),
+        description,
+        labourCostText,
+        isLabourAutoCalculated,
+        date,
+        validUntil,
+        quoteNumber
+    ) {
+        if (!isSuccessfullySaved) {
+            val draft = buildCurrentDraft()
+            if (draft != null) {
+                onAutoSaveDraft(draft)
+            }
+        }
+    }
+
+    // 2. Unmount / leave screen auto-save (Back button, bottom nav switch, screen exit)
+    DisposableEffect(currentDraftId) {
+        onDispose {
+            if (!isSuccessfullySaved) {
+                val draft = buildCurrentDraft()
+                if (draft != null) {
+                    onAutoSaveDraft(draft)
+                }
+            }
+        }
+    }
+
+    // 3. App pause / stop / lock auto-save (App backgrounded, device locked, process stopped)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, currentDraftId) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                if (!isSuccessfullySaved) {
+                    val draft = buildCurrentDraft()
+                    if (draft != null) {
+                        onAutoSaveDraft(draft)
+                    }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -99,11 +245,105 @@ fun NewQuoteScreen(
     ) {
         // 1. Header Section
         item {
-            Text(
-                text = if (language == "sw") "Tengeneza Makadirio ya Kazi (Quotation)" else "Create New Quotation",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurface
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (language == "sw") "Tengeneza Makadirio ya Kazi (Quotation)" else "Create New Quotation",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
+
+                if (draftToResume != null || quoteItems.isNotEmpty() || description.isNotBlank()) {
+                    Surface(
+                        color = AmberPrimary.copy(alpha = 0.14f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.EditNote,
+                                contentDescription = null,
+                                tint = AmberPrimary,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Text(
+                                text = if (language == "sw") "Rasimu Imehifadhiwa" else "Draft Saved",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
+                                color = AmberPrimary
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Optional Drafts Banner if other drafts are saved
+        if (draftToResume == null && availableDrafts.isNotEmpty()) {
+            item {
+                Surface(
+                    color = AmberPrimary.copy(alpha = 0.10f),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, AmberPrimary.copy(alpha = 0.35f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Drafts,
+                                contentDescription = null,
+                                tint = AmberPrimary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = if (language == "sw") "Una Rasimu ${availableDrafts.size} ya Makadirio" else "You have ${availableDrafts.size} Draft Quotation(s)",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (language == "sw") "Gusa kufungua na kuendelea nayo" else "Tap to resume unfinished work",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Button(
+                            onClick = {
+                                if (availableDrafts.size == 1) {
+                                    onSelectDraftToResume(availableDrafts.first())
+                                } else {
+                                    showDraftPickerModal = true
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary, contentColor = Color.Black),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = if (language == "sw") "Fungua" else "Resume",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         // 2. Customer Selection Box
@@ -304,11 +544,29 @@ fun NewQuoteScreen(
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                 modifier = Modifier.weight(1f)
                             )
-                            IconButton(
-                                onClick = { quoteItems.removeAt(index) },
-                                modifier = Modifier.size(28.dp)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Icon(imageVector = Icons.Default.DeleteOutline, contentDescription = "Remove", tint = RoseError, modifier = Modifier.size(16.dp))
+                                OutlinedButton(
+                                    onClick = { editingItemIndex = index },
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier
+                                        .height(28.dp)
+                                        .testTag("edit_item_button_$index")
+                                ) {
+                                    Icon(imageVector = Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.size(13.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(text = if (language == "sw") "Hariri" else "Edit", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                IconButton(
+                                    onClick = { quoteItems.removeAt(index) },
+                                    modifier = Modifier.size(28.dp).testTag("remove_item_button_$index")
+                                ) {
+                                    Icon(imageVector = Icons.Default.DeleteOutline, contentDescription = "Remove", tint = RoseError, modifier = Modifier.size(16.dp))
+                                }
                             }
                         }
 
@@ -385,20 +643,20 @@ fun NewQuoteScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (language == "sw") "Gharama ya Ufundi (Labour - 40% ya Vifaa):" else "Labour Cost (40% of Materials):",
+                            text = if (language == "sw") "Gharama ya Ufundi (Labour - ${businessSettings.labourPercentage.toInt()}% ya Vifaa):" else "Labour Cost (${businessSettings.labourPercentage.toInt()}% of Materials):",
                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                         )
                         if (!isLabourAutoCalculated) {
                             TextButton(
                                 onClick = {
                                     isLabourAutoCalculated = true
-                                    val auto = (materialsTotal * 0.40).toLong()
+                                    val auto = (materialsTotal * (businessSettings.labourPercentage / 100.0)).toLong()
                                     labourCostText = auto.toString()
                                 },
                                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
-                                    text = if (language == "sw") "Hesabu 40%" else "Recalculate 40%",
+                                    text = if (language == "sw") "Hesabu ${businessSettings.labourPercentage.toInt()}%" else "Recalculate ${businessSettings.labourPercentage.toInt()}%",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary
@@ -410,7 +668,7 @@ fun NewQuoteScreen(
                                 shape = RoundedCornerShape(6.dp)
                             ) {
                                 Text(
-                                    text = "40% Auto",
+                                    text = "${businessSettings.labourPercentage.toInt()}% Auto",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary,
@@ -451,7 +709,7 @@ fun NewQuoteScreen(
                     }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(
-                            text = if (language == "sw") "Ufundi (Labour - 40%):" else "Labour Cost (40%):",
+                            text = if (language == "sw") "Ufundi (Labour - ${businessSettings.labourPercentage.toInt()}%):" else "Labour Cost (${businessSettings.labourPercentage.toInt()}%):",
                             style = MaterialTheme.typography.bodyMedium
                         )
                         Text(text = Formatters.formatCurrency(labourCost), style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
@@ -521,6 +779,8 @@ fun NewQuoteScreen(
                         paid = false
                     )
 
+                    isSuccessfullySaved = true
+                    onDeleteDraft(currentDraftId)
                     onSaveQuote(newQuote)
                     Toast.makeText(context, "Makadirio ya ${newQuote.number} yamehifadhiwa!", Toast.LENGTH_LONG).show()
                 },
@@ -540,6 +800,46 @@ fun NewQuoteScreen(
                 )
             }
         }
+
+        if (draftToResume != null) {
+            item {
+                OutlinedButton(
+                    onClick = {
+                        isSuccessfullySaved = true
+                        onDeleteDraft(currentDraftId)
+                        Toast.makeText(context, if (language == "sw") "Rasimu imefutwa." else "Draft discarded.", Toast.LENGTH_SHORT).show()
+                        quoteItems.clear()
+                        description = ""
+                        selectedCustomer = customers.firstOrNull()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = RoseError)
+                ) {
+                    Icon(imageVector = Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (language == "sw") "Tupa Rasimu Hii (Discard Draft)" else "Discard This Draft",
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+    }
+
+    if (showDraftPickerModal) {
+        DraftPickerModal(
+            drafts = availableDrafts,
+            language = language,
+            onDismiss = { showDraftPickerModal = false },
+            onSelectDraft = { draft ->
+                showDraftPickerModal = false
+                onSelectDraftToResume(draft)
+            },
+            onDeleteDraft = onDeleteDraft
+        )
     }
 
     // Material Picker Bottomsheet/Dialog
@@ -582,6 +882,23 @@ fun NewQuoteScreen(
             onAdd = { customItem ->
                 quoteItems.add(customItem)
                 showCustomItemDialog = false
+            }
+        )
+    }
+
+    // Edit Selected Material Dialog
+    if (editingItemIndex != null && editingItemIndex!! in quoteItems.indices) {
+        val currentItem = quoteItems[editingItemIndex!!]
+        EditSelectedItemDialog(
+            item = currentItem,
+            language = language,
+            onDismiss = { editingItemIndex = null },
+            onSave = { updatedItem ->
+                val idx = editingItemIndex
+                if (idx != null && idx in quoteItems.indices) {
+                    quoteItems[idx] = updatedItem
+                }
+                editingItemIndex = null
             }
         )
     }
@@ -1033,6 +1350,328 @@ fun CustomItemDialog(
                     ) {
                         Text("Ongeza", fontWeight = FontWeight.Bold)
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun EditSelectedItemDialog(
+    item: QuoteItem,
+    language: String,
+    onDismiss: () -> Unit,
+    onSave: (QuoteItem) -> Unit
+) {
+    var name by remember { mutableStateOf(item.name) }
+    var unit by remember { mutableStateOf(item.unit) }
+    var priceText by remember { mutableStateOf(if (item.price % 1.0 == 0.0) item.price.toLong().toString() else item.price.toString()) }
+    var qtyText by remember { mutableStateOf(if (item.quantity % 1.0 == 0.0) item.quantity.toInt().toString() else item.quantity.toString()) }
+
+    val parsedPrice = priceText.toDoubleOrNull() ?: 0.0
+    val parsedQty = qtyText.toDoubleOrNull() ?: 0.0
+    val computedTotal = parsedPrice * parsedQty
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = if (language == "sw") "Hariri Kifaa Kilichochaguliwa" else "Edit Selected Material",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(if (language == "sw") "Jina la Kifaa" else "Material Name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("edit_material_name_input"),
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = unit,
+                        onValueChange = { unit = it },
+                        label = { Text(if (language == "sw") "Kipimo" else "Unit") },
+                        modifier = Modifier.weight(1f).testTag("edit_material_unit_input"),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    OutlinedTextField(
+                        value = qtyText,
+                        onValueChange = { qtyText = it },
+                        label = { Text(if (language == "sw") "Idadi" else "Quantity") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f).testTag("edit_material_qty_input"),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+
+                OutlinedTextField(
+                    value = priceText,
+                    onValueChange = { priceText = it },
+                    label = { Text(if (language == "sw") "Bei ya Kizio (TSh)" else "Unit Price (TZS)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth().testTag("edit_material_price_input"),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                // Subtotal preview box
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (language == "sw") "Jumla Ndogo (Subtotal):" else "Subtotal:",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold)
+                        )
+                        Text(
+                            text = Formatters.formatCurrency(computedTotal),
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                    }
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text(if (language == "sw") "Ghairi" else "Cancel")
+                    }
+                    Button(
+                        onClick = {
+                            if (name.isNotBlank() && parsedQty > 0) {
+                                onSave(
+                                    item.copy(
+                                        name = name.trim(),
+                                        unit = unit.trim().ifBlank { "Pcs" },
+                                        price = parsedPrice,
+                                        quantity = parsedQty,
+                                        total = computedTotal
+                                    )
+                                )
+                            }
+                        },
+                        modifier = Modifier
+                            .weight(1.3f)
+                            .testTag("save_material_edit_button"),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary, contentColor = Color.Black)
+                    ) {
+                        Text(if (language == "sw") "Hifadhi Mabadiliko" else "Save Changes", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DraftPickerModal(
+    drafts: List<QuoteDraft>,
+    language: String,
+    onDismiss: () -> Unit,
+    onSelectDraft: (QuoteDraft) -> Unit,
+    onDeleteDraft: (String) -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.EditNote,
+                            contentDescription = null,
+                            tint = AmberPrimary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Text(
+                            text = if (language == "sw") "Rasimu za Makadirio" else "Draft Quotations",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+
+                Text(
+                    text = if (language == "sw") "Chagua rasimu kuendelea nayo pale ulipoishia:" else "Select a draft to continue where you left off:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(drafts, key = { it.id }) { draft ->
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            border = BorderStroke(1.dp, AmberPrimary.copy(alpha = 0.35f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelectDraft(draft) }
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = draft.number,
+                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Surface(
+                                            color = AmberPrimary.copy(alpha = 0.2f),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                text = if (language == "sw") "RASIMU" else "DRAFT",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
+                                                color = AmberPrimary,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = Formatters.formatCurrency(draft.grandTotal),
+                                        style = MaterialTheme.typography.titleSmall.copy(
+                                            fontWeight = FontWeight.Black,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                Text(
+                                    text = if (draft.customerName.isNotBlank()) "Mteja: ${draft.customerName}" else (if (language == "sw") "Mteja Hajachaguliwa" else "No Client Selected"),
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                val itemCount = parseQuoteItemsFromJson(draft.itemsJson).size
+                                Text(
+                                    text = "$itemCount vifaa • Labour: ${Formatters.formatCurrency(draft.labour)}",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = draft.date.ifBlank { Formatters.getCurrentDateFormatted() },
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        IconButton(
+                                            onClick = { onDeleteDraft(draft.id) },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.DeleteOutline,
+                                                contentDescription = "Delete",
+                                                tint = RoseError,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                        Button(
+                                            onClick = { onSelectDraft(draft) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary, contentColor = Color.Black),
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                            modifier = Modifier.height(32.dp)
+                                        ) {
+                                            Text(
+                                                text = if (language == "sw") "Endelea" else "Resume",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(text = if (language == "sw") "Funga" else "Close")
                 }
             }
         }

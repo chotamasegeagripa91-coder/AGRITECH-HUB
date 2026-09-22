@@ -72,15 +72,9 @@ fun AgritechHubTheme(
             try {
                 val window = (view.context as? Activity)?.window
                 if (window != null) {
-                    window.statusBarColor = colorScheme.surface.toArgb()
-                    window.navigationBarColor = colorScheme.surface.toArgb()
                     val controller = WindowCompat.getInsetsController(window, view)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        controller.isAppearanceLightStatusBars = !darkTheme
-                    }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        controller.isAppearanceLightNavigationBars = !darkTheme
-                    }
+                    controller.isAppearanceLightStatusBars = !darkTheme
+                    controller.isAppearanceLightNavigationBars = !darkTheme
                 }
             } catch (e: Exception) {
                 // Safeguard against legacy window decor exceptions on customized vendor skins (e.g. TouchWiz/OneUI)

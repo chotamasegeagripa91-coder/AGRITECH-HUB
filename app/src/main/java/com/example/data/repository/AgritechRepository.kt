@@ -22,6 +22,11 @@ class AgritechRepository(
     val allCustomers: Flow<List<CustomerEntity>> = customerDao.getAllCustomers()
     val allQuotes: Flow<List<QuoteEntity>> = quoteDao.getAllQuotes()
 
+    // Quote Drafts
+    fun getQuoteDrafts(): List<QuoteDraft> = preferences.getQuoteDrafts()
+    fun saveQuoteDraft(draft: QuoteDraft) = preferences.saveQuoteDraft(draft)
+    fun deleteQuoteDraft(draftId: String) = preferences.deleteQuoteDraft(draftId)
+
     // Materials - safe upsert to prevent duplication
     suspend fun insertMaterial(material: MaterialEntity): Long {
         val upserted = upsertMaterial(material)
@@ -363,8 +368,21 @@ class AgritechRepository(
             materialDao.deleteByIds(demoMats.map { it.id })
         }
         materialDao.deleteDemoMaterials()
+
+        val allCustomers = customerDao.getAllCustomersList()
+        val demoCusts = allCustomers.filter { DemoUtils.isDemoCustomer(it) }
+        if (demoCusts.isNotEmpty()) {
+            demoCusts.forEach { customerDao.deleteCustomer(it) }
+        }
         customerDao.deleteDemoCustomers()
+
+        val allQuotes = quoteDao.getAllQuotesList()
+        val demoQuotes = allQuotes.filter { DemoUtils.isDemoQuote(it) }
+        if (demoQuotes.isNotEmpty()) {
+            demoQuotes.forEach { quoteDao.deleteQuote(it) }
+        }
         quoteDao.deleteDemoQuotes()
+
         preferences.setDemoMaterialsRemoved(true)
         preferences.setDemoCustomersRemoved(true)
         preferences.setDemoQuotesRemoved(true)
@@ -372,17 +390,7 @@ class AgritechRepository(
     }
 
     suspend fun ensureDemoDataSeeded() {
-        if (preferences.isDemoDataInitialized() || preferences.areDemoMaterialsRemoved()) {
-            return
-        }
-        com.example.data.local.AppDatabase.seedDefaultDataIfEmpty(
-            materialDao,
-            customerDao,
-            quoteDao,
-            preferences
-        )
-        preferences.setDemoDataInitialized(true)
-        preferences.setDemoDataSeeded(true)
+        deleteDemoData()
     }
 
     // JSON Backup Export
@@ -422,6 +430,7 @@ class AgritechRepository(
             put("signaturePath", biz.signaturePath)
             put("termsSw", biz.quotationTermsSw)
             put("termsEn", biz.quotationTermsEn)
+            put("labourPercentage", biz.labourPercentage)
         }
         root.put("business", bizObj)
 
@@ -561,7 +570,11 @@ class AgritechRepository(
                             bankAccountName = b.optString("bankAccountName", ""),
                             lipaNumber = b.optString("lipaNumber", ""),
                             mobileMoney = b.optString("mobileMoney", ""),
-                            logoPath = b.optString("logoPath", "")
+                            logoPath = b.optString("logoPath", ""),
+                            signaturePath = b.optString("signaturePath", ""),
+                            quotationTermsSw = b.optString("termsSw", "Haya makadirio (Quotation) ni halali kwa siku 14 pekee kuanzia tarehe iliyotolewa. Baada ya hapo, bei zinaweza kubadilika kulingana na hali ya soko."),
+                            quotationTermsEn = b.optString("termsEn", "This quotation is valid for 14 days only from the date of issue. Thereafter, prices are subject to change according to market conditions."),
+                            labourPercentage = b.optDouble("labourPercentage", 40.0)
                         )
                     )
                     businessRestored = true
@@ -718,17 +731,21 @@ class AgritechRepository(
 
     suspend fun restoreFromPayload(payload: CloudBackupPayload, currentUserId: String = ""): Boolean {
         return try {
-            preferences.saveBusinessSettings(payload.business)
+            if (payload.business.name.isNotBlank() && payload.business.name != "AGRITECH ELECTRICAL SOLUTIONS") {
+                preferences.saveBusinessSettings(payload.business)
+            }
             val user = if (currentUserId.isNotBlank()) currentUserId else payload.userId
             
-            if (preferences.areDemoMaterialsRemoved()) {
-                materialDao.deleteAll()
-            } else {
-                materialDao.deleteUserMaterials()
-            }
+            preferences.setDemoDataInitialized(true)
+            preferences.setDemoMaterialsRemoved(true)
+            preferences.setDemoCustomersRemoved(true)
+            preferences.setDemoQuotesRemoved(true)
+
             if (payload.materials.isNotEmpty()) {
+                materialDao.deleteAll()
                 val toInsert = payload.materials.map { m ->
                     m.copy(
+                        id = 0,
                         userId = if (m.userId.isNotBlank()) m.userId else user,
                         isDemo = false
                     )
@@ -736,16 +753,19 @@ class AgritechRepository(
                 materialDao.insertAll(toInsert)
             }
             
-            customerDao.deleteAll()
             if (payload.customers.isNotEmpty()) {
-                customerDao.insertAll(payload.customers)
+                customerDao.deleteAll()
+                val toInsertCust = payload.customers.map { c -> c.copy(id = 0) }
+                customerDao.insertAll(toInsertCust)
             }
             
-            quoteDao.deleteAll()
             if (payload.quotes.isNotEmpty()) {
-                quoteDao.insertAll(payload.quotes)
+                quoteDao.deleteAll()
+                val toInsertQuotes = payload.quotes.map { q -> q.copy(id = 0) }
+                quoteDao.insertAll(toInsertQuotes)
             }
-            // Do NOT call ensureDemoDataSeeded()! Cloud data state is authoritative.
+            
+            ensureBuiltinMaterialsSeeded(user)
             true
         } catch (e: Exception) {
             e.printStackTrace()

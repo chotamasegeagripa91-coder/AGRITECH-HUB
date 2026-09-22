@@ -1,5 +1,8 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -41,9 +44,20 @@ fun LockScreen(
     onToggleLanguage: () -> Unit = {},
     onCreatePassword: (password: String) -> Boolean = { false },
     onUnlock: (password: String) -> Boolean,
+    onBiometricUnlock: () -> Unit = {},
     onSwitchAccount: () -> Unit = {}
 ) {
     val focusManager = LocalFocusManager.current
+    val context = LocalContext.current
+    val prefs = remember { com.example.data.local.AppPreferences(context) }
+    val businessLogoPath = remember { prefs.getBusinessSettings().logoPath }
+    val logoBitmap = remember(businessLogoPath) {
+        if (businessLogoPath.isNotBlank()) {
+            com.example.ui.utils.ImageUtils.loadLogoBitmap(businessLogoPath, 160)
+        } else {
+            null
+        }
+    }
 
     // Mode: If not configured, we start in Create Password mode
     var isCreateMode by remember(isPasswordConfigured) { mutableStateOf(!isPasswordConfigured) }
@@ -119,19 +133,30 @@ fun LockScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // App Logo Icon
-                Box(
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(CircleShape)
-                        .background(AmberPrimary),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (isCreateMode) Icons.Default.Key else Icons.Default.Bolt,
+                if (logoBitmap != null && !isCreateMode) {
+                    Image(
+                        bitmap = logoBitmap.asImageBitmap(),
                         contentDescription = "Logo",
-                        tint = Color.Black,
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier
+                            .height(72.dp)
+                            .wrapContentWidth(),
+                        contentScale = ContentScale.Fit
                     )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(CircleShape)
+                            .background(AmberPrimary),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (isCreateMode) Icons.Default.Key else Icons.Default.Bolt,
+                            contentDescription = "Logo",
+                            tint = Color.Black,
+                            modifier = Modifier.size(36.dp)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -337,9 +362,13 @@ fun LockScreen(
                         keyboardActions = KeyboardActions(
                             onDone = {
                                 focusManager.clearFocus()
-                                val success = onUnlock(passwordInput)
-                                if (!success) {
-                                    errorMessage = if (language == "sw") "Nenosiri si sahihi!" else "Incorrect password!"
+                                if (passwordInput.isBlank()) {
+                                    errorMessage = if (language == "sw") "Tafadhali weka nenosiri!" else "Please enter password!"
+                                } else {
+                                    val success = onUnlock(passwordInput)
+                                    if (!success) {
+                                        errorMessage = if (language == "sw") "Nenosiri si sahihi!" else "Incorrect password!"
+                                    }
                                 }
                             }
                         ),
@@ -373,9 +402,13 @@ fun LockScreen(
                      Button(
                         onClick = {
                             focusManager.clearFocus()
-                            val success = onUnlock(passwordInput)
-                            if (!success) {
-                                errorMessage = if (language == "sw") "Nenosiri si sahihi!" else "Incorrect password!"
+                            if (passwordInput.isBlank()) {
+                                errorMessage = if (language == "sw") "Tafadhali weka nenosiri!" else "Please enter password!"
+                            } else {
+                                val success = onUnlock(passwordInput)
+                                if (!success) {
+                                    errorMessage = if (language == "sw") "Nenosiri si sahihi!" else "Incorrect password!"
+                                }
                             }
                         },
                         modifier = Modifier
@@ -427,10 +460,7 @@ fun LockScreen(
                                         subtitle = subtitle,
                                         negativeButtonText = negativeBtnText,
                                         onSuccess = {
-                                            val ok = onUnlock("")
-                                            if (!ok) {
-                                                errorMessage = if (language == "sw") "Haikufaulu kufungua!" else "Unlock failed!"
-                                            }
+                                            onBiometricUnlock()
                                         },
                                         onError = { err ->
                                             errorMessage = err

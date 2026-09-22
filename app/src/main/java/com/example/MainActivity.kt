@@ -14,7 +14,9 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.models.CustomerEntity
+import com.example.data.models.LicenseStatus
 import com.example.data.models.MaterialEntity
+import com.example.data.models.QuoteDraft
 import com.example.data.models.QuoteEntity
 import com.example.ui.components.*
 import com.example.ui.screens.*
@@ -47,10 +49,13 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             val isLocked by viewModel.isLocked.collectAsStateWithLifecycle()
             val isUserRegistered by viewModel.isUserRegistered.collectAsStateWithLifecycle()
             val userAccount by viewModel.userAccount.collectAsStateWithLifecycle()
+            val backupGoogleAccountEmail by viewModel.backupGoogleAccountEmail.collectAsStateWithLifecycle()
             val lastCloudSyncTime by viewModel.lastCloudSyncTime.collectAsStateWithLifecycle()
             val isCloudSyncing by viewModel.isCloudSyncing.collectAsStateWithLifecycle()
+            val isRestoringCloudData by viewModel.isRestoringCloudData.collectAsStateWithLifecycle()
             val isPasswordConfigured by viewModel.isPasswordConfigured.collectAsStateWithLifecycle()
             val autoLockEnabled by viewModel.autoLockEnabled.collectAsStateWithLifecycle()
+            val adminBlockState by viewModel.adminBlockState.collectAsStateWithLifecycle()
 
             val licenseInfo by viewModel.licenseInfo.collectAsStateWithLifecycle()
             val installationId = viewModel.getInstallationId()
@@ -60,6 +65,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             val materials by viewModel.materials.collectAsStateWithLifecycle()
             val customers by viewModel.customers.collectAsStateWithLifecycle()
             val quotes by viewModel.quotes.collectAsStateWithLifecycle()
+            val quoteDrafts by viewModel.quoteDrafts.collectAsStateWithLifecycle()
 
             var showActivationDialog by remember { mutableStateOf(false) }
             var editingMaterial by remember { mutableStateOf<MaterialEntity?>(null) }
@@ -69,9 +75,25 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             var selectedQuoteForDetails by remember { mutableStateOf<QuoteEntity?>(null) }
             var selectedQuoteForPreview by remember { mutableStateOf<QuoteEntity?>(null) }
             var preselectedCustomerForQuote by remember { mutableStateOf<CustomerEntity?>(null) }
+            var draftToResume by remember { mutableStateOf<QuoteDraft?>(null) }
 
             AgritechHubTheme(darkTheme = isDarkMode) {
-                if (!isUserRegistered) {
+                if (adminBlockState != null) {
+                    AdminBlockScreen(
+                        blockState = adminBlockState ?: "DISABLED",
+                        installationId = installationId,
+                        language = language,
+                        onContactSupport = { text ->
+                            try {
+                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
+                                intent.data = android.net.Uri.parse("https://wa.me/255627318891?text=${android.net.Uri.encode(text)}")
+                                startActivity(intent)
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(this@MainActivity, "WhatsApp haipatikani kwenye kifaa hiki.", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+                } else if (!isUserRegistered) {
                     AuthScreen(
                         language = language,
                         onToggleLanguage = { viewModel.toggleLanguage() },
@@ -100,6 +122,32 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                             viewModel.resendOtp(emailOrPhone)
                         }
                     )
+                } else if (licenseInfo.status in listOf(
+                        LicenseStatus.DISABLED,
+                        LicenseStatus.REVOKED,
+                        LicenseStatus.EXPIRED,
+                        LicenseStatus.LICENSE_EXPIRED,
+                        LicenseStatus.TRIAL_EXPIRED,
+                        LicenseStatus.INVALID_DEVICE,
+                        LicenseStatus.TAMPERED
+                    )) {
+                    LicenseBlockScreen(
+                        licenseStatus = licenseInfo.status,
+                        installationId = installationId,
+                        language = language,
+                        onContactSupport = { text ->
+                            try {
+                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
+                                intent.data = android.net.Uri.parse("https://wa.me/255627318891?text=${android.net.Uri.encode(text)}")
+                                startActivity(intent)
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(this@MainActivity, "WhatsApp haipatikani kwenye kifaa hiki.", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onActivateNewLicense = { key ->
+                            viewModel.activateLicense(key)
+                        }
+                    )
                 } else if (isLocked) {
                     LockScreen(
                         businessName = businessSettings.name,
@@ -108,12 +156,14 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                         onToggleLanguage = { viewModel.toggleLanguage() },
                         onCreatePassword = { password -> viewModel.createInitialPassword(password) },
                         onUnlock = { password -> 
-                            if (password.isEmpty()) {
-                                viewModel.unlockWithBiometric()
-                                true
-                            } else {
+                            if (password.isNotEmpty()) {
                                 viewModel.unlockApp(password)
+                            } else {
+                                false
                             }
+                        },
+                        onBiometricUnlock = {
+                            viewModel.unlockWithBiometric()
                         },
                         onSwitchAccount = { viewModel.logoutUser() }
                     )
@@ -202,21 +252,51 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                         preselectedCustomer = preselectedCustomerForQuote,
                                         initialQuoteNumber = viewModel.getNextQuoteNumber(),
                                         language = language,
+                                        draftToResume = draftToResume,
+                                        availableDrafts = quoteDrafts,
+                                        businessSettings = businessSettings,
                                         onSaveQuote = { quote ->
                                             viewModel.insertQuote(quote)
                                             preselectedCustomerForQuote = null
+                                            draftToResume = null
                                             viewModel.navigateTo(AppScreen.QUOTES_HISTORY)
                                         },
-                                        onAddCustomer = { newCust -> viewModel.insertCustomer(newCust) }
+                                        onAddCustomer = { newCust -> viewModel.insertCustomer(newCust) },
+                                        onAutoSaveDraft = { draft ->
+                                            viewModel.saveQuoteDraft(draft)
+                                        },
+                                        onDeleteDraft = { draftId ->
+                                            viewModel.deleteQuoteDraft(draftId)
+                                            if (draftToResume?.id == draftId) {
+                                                draftToResume = null
+                                            }
+                                        },
+                                        onSelectDraftToResume = { draft ->
+                                            draftToResume = draft
+                                        }
                                     )
                                 }
 
                                 AppScreen.QUOTES_HISTORY -> {
                                     QuotesHistoryScreen(
                                         quotes = quotes,
+                                        drafts = quoteDrafts,
                                         language = language,
                                         onSelectQuote = { quote -> selectedQuoteForDetails = quote },
-                                        onNewQuote = { viewModel.navigateTo(AppScreen.NEW_QUOTE) }
+                                        onSelectDraft = { draft ->
+                                            draftToResume = draft
+                                            viewModel.navigateTo(AppScreen.NEW_QUOTE)
+                                        },
+                                        onDeleteDraft = { draft ->
+                                            viewModel.deleteQuoteDraft(draft.id)
+                                            if (draftToResume?.id == draft.id) {
+                                                draftToResume = null
+                                            }
+                                        },
+                                        onNewQuote = {
+                                            draftToResume = null
+                                            viewModel.navigateTo(AppScreen.NEW_QUOTE)
+                                        }
                                     )
                                 }
 
@@ -236,8 +316,12 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                         onExportBackup = { viewModel.exportBackupJson() },
                                         onImportBackup = { json -> viewModel.importBackupJson(json) },
                                         userAccount = userAccount,
+                                        backupGoogleAccountEmail = backupGoogleAccountEmail,
+                                        onUpdateBackupGoogleAccount = { newEmail -> viewModel.setBackupGoogleAccount(newEmail) },
                                         lastSyncTime = lastCloudSyncTime,
-                                        isSyncing = isCloudSyncing,
+                                        isSyncing = isCloudSyncing || isRestoringCloudData,
+                                        isBackingUp = isCloudSyncing,
+                                        isRestoring = isRestoringCloudData,
                                         onSyncCloud = { viewModel.syncDataToCloud() },
                                         onRestoreCloud = { viewModel.restoreDataFromCloud() },
                                         onDeleteDemoData = { viewModel.deleteDemoData() },
@@ -304,8 +388,9 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                     }
 
                     if (selectedQuoteForDetails != null) {
+                        val currentQuote = quotes.find { it.id == selectedQuoteForDetails!!.id } ?: selectedQuoteForDetails!!
                         QuoteDetailsDialog(
-                            quote = selectedQuoteForDetails!!,
+                            quote = currentQuote,
                             businessSettings = businessSettings,
                             language = language,
                             onDismiss = { selectedQuoteForDetails = null },
@@ -326,8 +411,9 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                     }
 
                     if (selectedQuoteForPreview != null) {
+                        val currentPreviewQuote = quotes.find { it.id == selectedQuoteForPreview!!.id } ?: selectedQuoteForPreview!!
                         QuotePrintPreviewDialog(
-                            quote = selectedQuoteForPreview!!,
+                            quote = currentPreviewQuote,
                             businessSettings = businessSettings,
                             language = language,
                             onDismiss = { selectedQuoteForPreview = null }

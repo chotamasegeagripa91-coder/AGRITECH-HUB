@@ -74,15 +74,24 @@ fun SettingsScreen(
     onExportBackup: () -> String,
     onImportBackup: (String) -> Pair<Boolean, String>,
     userAccount: UserAccount? = null,
+    backupGoogleAccountEmail: String = "",
+    onUpdateBackupGoogleAccount: (String) -> Unit = {},
     lastSyncTime: Long = 0L,
     isSyncing: Boolean = false,
+    isBackingUp: Boolean = false,
+    isRestoring: Boolean = false,
     onSyncCloud: () -> Unit = {},
     onRestoreCloud: () -> Unit = {},
+    onRestoreCloudFromAccount: ((String) -> Unit)? = null,
     onDeleteDemoData: (() -> Unit)? = null,
     onChangePassword: (suspend (String, String) -> Pair<Boolean, String>)? = null,
     onLogout: () -> Unit = {}
 ) {
     val context = LocalContext.current
+
+    var showChangeBackupAccountDialog by remember { mutableStateOf(false) }
+    var changeAccountInputEmail by remember { mutableStateOf("") }
+    var isAccountPickerLoading by remember { mutableStateOf(false) }
 
     var businessName by remember(businessSettings) { mutableStateOf(businessSettings.name) }
     var slogan by remember(businessSettings) { mutableStateOf(businessSettings.slogan) }
@@ -99,6 +108,7 @@ fun SettingsScreen(
     var signaturePath by remember(businessSettings) { mutableStateOf(businessSettings.signaturePath) }
     var quotationTermsSw by remember(businessSettings) { mutableStateOf(businessSettings.quotationTermsSw) }
     var quotationTermsEn by remember(businessSettings) { mutableStateOf(businessSettings.quotationTermsEn) }
+    var labourPercentageText by remember(businessSettings) { mutableStateOf(businessSettings.labourPercentage.toInt().toString()) }
 
     val logoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -377,6 +387,16 @@ fun SettingsScreen(
                         shape = RoundedCornerShape(12.dp)
                     )
 
+                    OutlinedTextField(
+                        value = labourPercentageText,
+                        onValueChange = { labourPercentageText = it },
+                        label = { Text(if (language == "sw") "Asilimia ya Gharama ya Ufundi (Labour %)" else "Labour Cost Percentage (%)") },
+                        modifier = Modifier.fillMaxWidth().testTag("settings_labour_percentage_input"),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -530,7 +550,8 @@ fun SettingsScreen(
                                 logoPath = logoPath.trim(),
                                 signaturePath = signaturePath.trim(),
                                 quotationTermsSw = quotationTermsSw.trim(),
-                                quotationTermsEn = quotationTermsEn.trim()
+                                quotationTermsEn = quotationTermsEn.trim(),
+                                labourPercentage = labourPercentageText.toDoubleOrNull() ?: 40.0
                             )
                             onSaveBusinessSettings(updated)
                             Toast.makeText(context, if (language == "sw") "Taarifa zimehifadhiwa!" else "Business info saved!", Toast.LENGTH_SHORT).show()
@@ -670,7 +691,8 @@ fun SettingsScreen(
                                 logoPath = logoPath.trim(),
                                 signaturePath = signaturePath.trim(),
                                 quotationTermsSw = quotationTermsSw.trim(),
-                                quotationTermsEn = quotationTermsEn.trim()
+                                quotationTermsEn = quotationTermsEn.trim(),
+                                labourPercentage = labourPercentageText.toDoubleOrNull() ?: 40.0
                             )
                             onSaveBusinessSettings(updated)
                             Toast.makeText(context, if (language == "sw") "Akaunti za malipo zimehifadhiwa!" else "Payment accounts saved!", Toast.LENGTH_SHORT).show()
@@ -805,6 +827,7 @@ fun SettingsScreen(
                         LicenseStatus.TRIAL_EXPIRED -> if (language == "sw") "Muda wa Jaribio Umekwisha" else "Trial Expired"
                         LicenseStatus.LICENSE_EXPIRED -> if (language == "sw") "Muda wa Leseni Umekwisha" else "License Expired"
                         LicenseStatus.TAMPERED -> if (language == "sw") "Tahadhari: Saa Imebadilishwa" else "Clock Tampered"
+                        else -> if (language == "sw") "Leseni Haina Ruhusa / Imefungwa" else "License Invalid / Disabled"
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -920,98 +943,158 @@ fun SettingsScreen(
                     ) {
                         Column {
                             Text(
-                                text = if (language == "sw") "Hifadhi ya Data (Data & Backup)" else "Data & Backup",
+                                text = if (language == "sw") "Akaunti ya Hifadhi (Backup Account)" else "Backup Account",
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                             )
                             Text(
-                                text = if (language == "sw") "Mfumo wa wingu (Cloud) na faili la simu (Local)" else "Cloud sync and optional local file backup",
+                                text = if (language == "sw") "Hifadhi na urejeshe data zako kwa Google Account" else "Cloud backup and automatic data restore via Google Account",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         Icon(
-                            imageVector = Icons.Default.Storage,
+                            imageVector = Icons.Default.CloudSync,
                             contentDescription = null,
                             tint = AmberPrimary
                         )
                     }
 
-                    // 5A. Cloud Sync (Main Automatic System)
+                    // 5A. Google Backup Account Card
                     Surface(
                         color = MaterialTheme.colorScheme.surface,
                         shape = RoundedCornerShape(12.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, AmberPrimary.copy(alpha = 0.3f)),
-                        modifier = Modifier.fillMaxWidth()
+                        border = androidx.compose.foundation.BorderStroke(1.dp, AmberPrimary.copy(alpha = 0.4f)),
+                        modifier = Modifier.fillMaxWidth().testTag("backup_account_section")
                     ) {
-                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            // Current Selected Backup Account
+                            val effectiveBackupEmail = backupGoogleAccountEmail.ifBlank { userAccount?.email ?: "" }
+                            
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .size(40.dp)
+                                        .clip(RoundedCornerShape(10.dp))
                                         .background(AmberPrimary.copy(alpha = 0.15f)),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(Icons.Default.CloudSync, contentDescription = null, tint = AmberPrimary, modifier = Modifier.size(20.dp))
+                                    Icon(Icons.Default.AccountCircle, contentDescription = null, tint = AmberPrimary, modifier = Modifier.size(26.dp))
                                 }
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = if (language == "sw") "Hifadhi ya Wingu (Cloud Sync — Mfumo Mkuu)" else "Cloud Sync (Main Automatic System)",
-                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
-                                    )
-                                    Text(
-                                        text = if (language == "sw") "Usawazishaji wa moja kwa moja na Firebase" else "Automatic synchronization with Firebase",
+                                        text = if (language == "sw") "Akaunti ya Google ya Hifadhi" else "Google Backup Account",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = if (effectiveBackupEmail.isNotBlank()) effectiveBackupEmail else if (language == "sw") "Hakuna akaunti iliyochaguliwa" else "No account selected",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = if (effectiveBackupEmail.isNotBlank()) MaterialTheme.colorScheme.onSurface else RoseError
                                     )
                                 }
                             }
 
-                            Text(
-                                text = if (lastSyncTime > 0) {
-                                    val timeStr = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(lastSyncTime))
-                                    if (language == "sw") "Wingu lilisawazishwa mwisho: $timeStr" else "Last cloud sync: $timeStr"
-                                } else {
-                                    if (language == "sw") "Mfumo unahifadhi ndani ya simu kwanza (Offline-First) na kusawazisha wingu pindi mtandao unapopatikana."
-                                    else "System operates offline-first and syncs to cloud whenever connected."
+                            // Change Backup Account Button
+                            OutlinedButton(
+                                onClick = {
+                                    changeAccountInputEmail = effectiveBackupEmail
+                                    showChangeBackupAccountDialog = true
                                 },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(44.dp)
+                                    .testTag("change_backup_account_btn"),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(Icons.Default.ManageAccounts, contentDescription = null, modifier = Modifier.size(18.dp), tint = AmberPrimary)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (language == "sw") "Badilisha Akaunti ya Hifadhi" else "Change Backup Account",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
 
+                            // Last Backup / Sync Time & Availability Status
+                            Surface(
+                                color = if (lastSyncTime > 0) EmeraldSuccess.copy(alpha = 0.1f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(8.dp),
+                                border = if (lastSyncTime > 0) androidx.compose.foundation.BorderStroke(1.dp, EmeraldSuccess.copy(alpha = 0.3f)) else null,
+                                modifier = Modifier.fillMaxWidth().testTag("backup_status_card")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (lastSyncTime > 0) Icons.Default.CheckCircle else Icons.Default.AccessTime,
+                                        contentDescription = null,
+                                        tint = if (lastSyncTime > 0) EmeraldSuccess else AmberPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = if (lastSyncTime > 0) {
+                                                val timeStr = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(lastSyncTime))
+                                                if (language == "sw") "Hifadhi inapatikana (Mwisho: $timeStr)" else "Backup available (Last: $timeStr)"
+                                            } else {
+                                                if (effectiveBackupEmail.isNotBlank()) {
+                                                    if (language == "sw") "Akaunti imeunganishwa. Tayari kwa Hifadhi au Urejeshaji." else "Account connected. Ready for Backup or Restore."
+                                                } else {
+                                                    if (language == "sw") "Chagua akaunti ya Google hapo juu." else "Select a Google account above."
+                                                }
+                                            },
+                                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                            color = if (lastSyncTime > 0) EmeraldSuccess else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Distinct Action Buttons: Backup Now & Restore Data
+                            val isOperationRunning = isBackingUp || isRestoring || isSyncing
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Button(
                                     onClick = onSyncCloud,
-                                    enabled = !isSyncing,
-                                    modifier = Modifier.weight(1f).height(44.dp).testTag("cloud_sync_now_btn"),
+                                    enabled = !isOperationRunning,
+                                    modifier = Modifier.weight(1f).height(46.dp).testTag("backup_now_btn"),
                                     shape = RoundedCornerShape(10.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary, contentColor = Color.Black)
                                 ) {
-                                    if (isSyncing) {
-                                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.Black, strokeWidth = 2.dp)
+                                    if (isBackingUp) {
+                                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.Black, strokeWidth = 2.dp)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(if (language == "sw") "Inahifadhi..." else "Backing up...", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     } else {
-                                        Icon(imageVector = Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Icon(imageVector = Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text(if (language == "sw") "Cloud Sync" else "Cloud Sync", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        Text(if (language == "sw") "Hifadhi Sasa" else "Backup Now", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
 
                                 OutlinedButton(
                                     onClick = onRestoreCloud,
-                                    enabled = !isSyncing,
-                                    modifier = Modifier.weight(1f).height(44.dp).testTag("cloud_restore_now_btn"),
+                                    enabled = !isOperationRunning,
+                                    modifier = Modifier.weight(1f).height(46.dp).testTag("restore_data_btn"),
                                     shape = RoundedCornerShape(10.dp)
                                 ) {
-                                    Icon(imageVector = Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(if (language == "sw") "Restore from Cloud" else "Restore from Cloud", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    if (isRestoring) {
+                                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = EmeraldSuccess)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(if (language == "sw") "Inarejesha..." else "Restoring...", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EmeraldSuccess)
+                                    } else {
+                                        Icon(imageVector = Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp), tint = EmeraldSuccess)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(if (language == "sw") "Rejesha Data" else "Restore Data", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }
@@ -1174,93 +1257,7 @@ fun SettingsScreen(
                         }
                     }
 
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                    // Delete Demo Data Option
-                    var showDeleteDemoConfirmDialog by remember { mutableStateOf(false) }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (language == "sw") "Futa Data za Mfano (Demo Data)" else "Delete Demo Data",
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = RoseError
-                            )
-                            Text(
-                                text = if (language == "sw")
-                                    "Ondoa data zote za mfano zilizokuja na mfumo (vifaa, wateja, makadirio). Hazitarejeshwa tena hata ukiingia upya au ukisawazisha (Sync)."
-                                else
-                                    "Permanently remove bundled sample materials, customers, and quotes. They will never be recreated, even after re-login or sync.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(8.dp))
-
-                        OutlinedButton(
-                            onClick = { showDeleteDemoConfirmDialog = true },
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = RoseError),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, RoseError.copy(alpha = 0.5f)),
-                            modifier = Modifier.testTag("delete_demo_data_btn")
-                        ) {
-                            Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp), tint = RoseError)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(if (language == "sw") "Futa Mfano" else "Delete Demo", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = RoseError)
-                        }
-                    }
-
-                    if (showDeleteDemoConfirmDialog) {
-                        AlertDialog(
-                            onDismissRequest = { showDeleteDemoConfirmDialog = false },
-                            icon = {
-                                Icon(Icons.Default.WarningAmber, contentDescription = null, tint = RoseError, modifier = Modifier.size(36.dp))
-                            },
-                            title = {
-                                Text(
-                                    text = if (language == "sw") "Futa Data za Mfano Kabisa?" else "Permanently Delete Demo Data?",
-                                    fontWeight = FontWeight.Bold
-                                )
-                            },
-                            text = {
-                                Text(
-                                    text = if (language == "sw")
-                                        "Je, una uhakika unataka kuondoa data zote za mfano zilizokuja na mfumo? Data zako halisi ulizoweka au kuingiza hazitaguswa, na data za mfano hazitarejeshwa tena hata ukifanya Sync."
-                                    else
-                                        "Are you sure you want to permanently delete all demo/sample records? Your real added or imported data will not be affected, and demo data will never be recreated or downloaded."
-                                )
-                            },
-                            confirmButton = {
-                                Button(
-                                    onClick = {
-                                        showDeleteDemoConfirmDialog = false
-                                        onDeleteDemoData?.invoke()
-                                        Toast.makeText(
-                                            context,
-                                            if (language == "sw") "Data za mfano zimefutwa kabisa!" else "Demo data permanently removed!",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = RoseError),
-                                    modifier = Modifier.testTag("confirm_delete_demo_btn")
-                                ) {
-                                    Text(if (language == "sw") "Ndio, Futa Kabisa" else "Yes, Delete Permanently", color = Color.White, fontWeight = FontWeight.Bold)
-                                }
-                            },
-                            dismissButton = {
-                                TextButton(
-                                    onClick = { showDeleteDemoConfirmDialog = false },
-                                    modifier = Modifier.testTag("cancel_delete_demo_btn")
-                                ) {
-                                    Text(if (language == "sw") "Ghairi" else "Cancel")
-                                }
-                            }
-                        )
-                    }
                 }
             }
         }
@@ -1376,7 +1373,7 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
-                    text = "AGRITECH HUB v2.5 (Offline Electrical System)",
+                    text = "AGRITECH HUB v1.1 (Offline Electrical System)",
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1463,6 +1460,140 @@ fun SettingsScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess, contentColor = Color.White)
                 ) {
                     Text("OK", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+
+    // Change Backup Google Account Dialog
+    if (showChangeBackupAccountDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!isAccountPickerLoading) {
+                    showChangeBackupAccountDialog = false
+                }
+            },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.ManageAccounts,
+                    contentDescription = null,
+                    tint = AmberPrimary,
+                    modifier = Modifier.size(28.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = if (language == "sw") "Badilisha Akaunti ya Hifadhi" else "Change Backup Account",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = if (language == "sw") 
+                            "Chagua au andika akaunti ya Google itakayotumika kuhifadhi na kurejesha data zako zote kiotomatiki."
+                            else "Select or enter the Google account to be used for automatic backup and data recovery.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    // Button to pick directly from Android Device Accounts
+                    Button(
+                        onClick = {
+                            isAccountPickerLoading = true
+                            coroutineScope.launch {
+                                try {
+                                    val result = com.example.data.cloud.FirebaseAuthManager.signInWithGoogle(context, language)
+                                    isAccountPickerLoading = false
+                                    if (result.success && !result.email.isNullOrBlank()) {
+                                        changeAccountInputEmail = result.email
+                                        onUpdateBackupGoogleAccount(result.email)
+                                        Toast.makeText(
+                                            context,
+                                            if (language == "sw") "Akaunti ya ${result.email} imewekwa kikamilifu!" else "Account ${result.email} selected!",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    } else if (!result.isCancelled && !result.errorMessage.isNullOrBlank()) {
+                                        Toast.makeText(context, result.errorMessage, Toast.LENGTH_LONG).show()
+                                    }
+                                } catch (e: Exception) {
+                                    isAccountPickerLoading = false
+                                    Toast.makeText(context, "Hitilafu: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        enabled = !isAccountPickerLoading,
+                        modifier = Modifier.fillMaxWidth().height(46.dp).testTag("select_device_google_account_btn"),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
+                    ) {
+                        if (isAccountPickerLoading) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(if (language == "sw") "Inatafuta akaunti..." else "Checking accounts...", fontSize = 12.sp)
+                        } else {
+                            Icon(Icons.Default.AccountCircle, contentDescription = null, modifier = Modifier.size(20.dp), tint = AmberPrimary)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(if (language == "sw") "Chagua Kutoka Kwenye Simu" else "Choose From Device", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        HorizontalDivider(modifier = Modifier.weight(1f))
+                        Text(if (language == "sw") "AU ANDIKA HAPA" else "OR TYPE HERE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                        HorizontalDivider(modifier = Modifier.weight(1f))
+                    }
+
+                    OutlinedTextField(
+                        value = changeAccountInputEmail,
+                        onValueChange = { changeAccountInputEmail = it },
+                        label = { Text(if (language == "sw") "Barua Pepe ya Google (Gmail)" else "Google Email (Gmail)") },
+                        leadingIcon = { Icon(Icons.Default.Email, contentDescription = null, tint = AmberPrimary) },
+                        modifier = Modifier.fillMaxWidth().testTag("backup_email_input"),
+                        singleLine = true,
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val cleanEmail = changeAccountInputEmail.trim()
+                        if (cleanEmail.contains("@")) {
+                            onUpdateBackupGoogleAccount(cleanEmail)
+                            showChangeBackupAccountDialog = false
+                            Toast.makeText(
+                                context,
+                                if (language == "sw") "Akaunti ya hifadhi imesasishwa: $cleanEmail" else "Backup account updated: $cleanEmail",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            Toast.makeText(
+                                context,
+                                if (language == "sw") "Tafadhali weka barua pepe sahihi ya Google" else "Please enter a valid Google email",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    },
+                    modifier = Modifier.testTag("save_backup_account_btn"),
+                    colors = ButtonDefaults.buttonColors(containerColor = AmberPrimary, contentColor = Color.Black)
+                ) {
+                    Text(if (language == "sw") "Hifadhi Akaunti" else "Save Account", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { showChangeBackupAccountDialog = false },
+                    modifier = Modifier.testTag("cancel_backup_account_btn")
+                ) {
+                    Text(if (language == "sw") "Ghairi" else "Cancel")
                 }
             }
         )

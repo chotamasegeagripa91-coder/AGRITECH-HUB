@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import com.example.data.licensing.LicensingEngine
 import com.example.data.models.*
 import com.example.data.security.SecurityUtils
+import java.util.UUID
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -201,6 +202,42 @@ class AppPreferences(context: Context) {
         prefs.edit().putLong("agritech_last_cloud_sync", timeMs).apply()
     }
 
+    fun getAdminBlockState(): String? {
+        return prefs.getString("agritech_admin_block_state", null)
+    }
+
+    fun setAdminBlockState(state: String?) {
+        prefs.edit().putString("agritech_admin_block_state", state).apply()
+    }
+
+    fun setFirebaseLicenseInfo(status: String?, deviceId: String?, expiryDate: String?, key: String?) {
+        val editor = prefs.edit()
+        if (status != null) editor.putString("agritech_firebase_license_status", status) else editor.remove("agritech_firebase_license_status")
+        if (deviceId != null) editor.putString("agritech_firebase_license_device", deviceId) else editor.remove("agritech_firebase_license_device")
+        if (expiryDate != null) editor.putString("agritech_license_expires", expiryDate)
+        if (key != null) editor.putString("agritech_license_key", key)
+
+        val raw = "${status.orEmpty()}|${deviceId.orEmpty()}|${expiryDate.orEmpty()}|${key.orEmpty()}"
+        val signature = SecurityUtils.hashPassword(raw, "AGRITECH_LICENSE_INTEGRITY_SALT_2026")
+        editor.putString("agritech_license_sig", signature)
+        editor.apply()
+    }
+
+    fun isLocalLicenseTampered(): Boolean {
+        val status = prefs.getString("agritech_firebase_license_status", null)
+        val deviceId = prefs.getString("agritech_firebase_license_device", null)
+        val expiryDate = prefs.getString("agritech_license_expires", null)
+        val key = prefs.getString("agritech_license_key", null)
+        val storedSig = prefs.getString("agritech_license_sig", null)
+
+        if (storedSig == null && status == null && deviceId == null && expiryDate == null && key == null) {
+            return false // Clean state
+        }
+        val raw = "${status.orEmpty()}|${deviceId.orEmpty()}|${expiryDate.orEmpty()}|${key.orEmpty()}"
+        val expectedSig = SecurityUtils.hashPassword(raw, "AGRITECH_LICENSE_INTEGRITY_SALT_2026")
+        return storedSig != expectedSig
+    }
+
     fun setTrialStartDate(startMs: Long) {
         LicensingEngine.setTrialDates(prefs, startMs)
     }
@@ -256,7 +293,8 @@ class AppPreferences(context: Context) {
             logoPath = prefs.getString("biz_logo_path", "") ?: "",
             signaturePath = prefs.getString("biz_signature_path", "") ?: "",
             quotationTermsSw = prefs.getString("biz_terms_sw", "Haya makadirio (Quotation) ni halali kwa siku 14 pekee kuanzia tarehe iliyotolewa. Baada ya hapo, bei zinaweza kubadilika kulingana na hali ya soko.") ?: "Haya makadirio (Quotation) ni halali kwa siku 14 pekee kuanzia tarehe iliyotolewa. Baada ya hapo, bei zinaweza kubadilika kulingana na hali ya soko.",
-            quotationTermsEn = prefs.getString("biz_terms_en", "This quotation is valid for 14 days only from the date of issue. Thereafter, prices are subject to change according to market conditions.") ?: "This quotation is valid for 14 days only from the date of issue. Thereafter, prices are subject to change according to market conditions."
+            quotationTermsEn = prefs.getString("biz_terms_en", "This quotation is valid for 14 days only from the date of issue. Thereafter, prices are subject to change according to market conditions.") ?: "This quotation is valid for 14 days only from the date of issue. Thereafter, prices are subject to change according to market conditions.",
+            labourPercentage = prefs.getFloat("biz_labour_percentage", 40.0f).toDouble()
         )
     }
 
@@ -278,6 +316,7 @@ class AppPreferences(context: Context) {
             .putString("biz_signature_path", settings.signaturePath)
             .putString("biz_terms_sw", settings.quotationTermsSw)
             .putString("biz_terms_en", settings.quotationTermsEn)
+            .putFloat("biz_labour_percentage", settings.labourPercentage.toFloat())
             .apply()
     }
 
@@ -374,5 +413,113 @@ class AppPreferences(context: Context) {
         val current = getDeletedBuiltinCodes().toMutableSet()
         current.add(internalCode)
         prefs.edit().putStringSet("agritech_deleted_builtin_codes", current).apply()
+    }
+
+    // ==========================================
+    // Automatic Draft Quotations Persistence
+    // ==========================================
+
+    fun getQuoteDrafts(): List<QuoteDraft> {
+        val jsonStr = prefs.getString("agritech_quote_drafts", "[]") ?: "[]"
+        val list = mutableListOf<QuoteDraft>()
+        try {
+            val arr = JSONArray(jsonStr)
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(
+                    QuoteDraft(
+                        id = obj.optString("id", UUID.randomUUID().toString()),
+                        number = obj.optString("number", "QTN-001"),
+                        date = obj.optString("date", ""),
+                        validUntil = obj.optString("validUntil", ""),
+                        customerId = if (obj.has("customerId") && !obj.isNull("customerId")) obj.optInt("customerId") else null,
+                        customerName = obj.optString("customerName", ""),
+                        customerPhone = obj.optString("customerPhone", ""),
+                        customerLocation = obj.optString("customerLocation", ""),
+                        description = obj.optString("description", ""),
+                        itemsJson = obj.optString("itemsJson", "[]"),
+                        materialsTotal = obj.optDouble("materialsTotal", 0.0),
+                        isLabourAutoCalculated = obj.optBoolean("isLabourAutoCalculated", true),
+                        labour = obj.optDouble("labour", 0.0),
+                        grandTotal = obj.optDouble("grandTotal", 0.0),
+                        updatedAt = obj.optLong("updatedAt", System.currentTimeMillis())
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            // fallback safe return
+        }
+        return list.sortedByDescending { it.updatedAt }
+    }
+
+    fun saveQuoteDraft(draft: QuoteDraft) {
+        val currentList = getQuoteDrafts().toMutableList()
+        val index = currentList.indexOfFirst { it.id == draft.id }
+        val updatedDraft = draft.copy(updatedAt = System.currentTimeMillis())
+        if (index >= 0) {
+            currentList[index] = updatedDraft
+        } else {
+            currentList.add(0, updatedDraft)
+        }
+        saveQuoteDraftsInternal(currentList)
+    }
+
+    fun deleteQuoteDraft(draftId: String) {
+        val currentList = getQuoteDrafts().filter { it.id != draftId }
+        saveQuoteDraftsInternal(currentList)
+    }
+
+    fun clearAllQuoteDrafts() {
+        prefs.edit().remove("agritech_quote_drafts").apply()
+    }
+
+    private fun saveQuoteDraftsInternal(drafts: List<QuoteDraft>) {
+        val arr = JSONArray()
+        for (d in drafts) {
+            val obj = JSONObject().apply {
+                put("id", d.id)
+                put("number", d.number)
+                put("date", d.date)
+                put("validUntil", d.validUntil)
+                if (d.customerId != null) put("customerId", d.customerId) else put("customerId", JSONObject.NULL)
+                put("customerName", d.customerName)
+                put("customerPhone", d.customerPhone)
+                put("customerLocation", d.customerLocation)
+                put("description", d.description)
+                put("itemsJson", d.itemsJson)
+                put("materialsTotal", d.materialsTotal)
+                put("isLabourAutoCalculated", d.isLabourAutoCalculated)
+                put("labour", d.labour)
+                put("grandTotal", d.grandTotal)
+                put("updatedAt", d.updatedAt)
+            }
+            arr.put(obj)
+        }
+        prefs.edit().putString("agritech_quote_drafts", arr.toString()).apply()
+    }
+
+    fun getBackupGoogleAccountEmail(): String {
+        val saved = prefs.getString("agritech_backup_google_email", null)
+        if (!saved.isNullOrBlank()) return saved
+        val acc = getUserAccount()
+        if (acc != null && acc.email.isNotBlank()) {
+            return acc.email
+        }
+        return ""
+    }
+
+    fun setBackupGoogleAccountEmail(email: String) {
+        prefs.edit().putString("agritech_backup_google_email", email.trim()).apply()
+    }
+
+    fun getBackupGoogleAccountUid(): String {
+        val saved = prefs.getString("agritech_backup_google_uid", null)
+        if (!saved.isNullOrBlank()) return saved
+        val acc = getUserAccount()
+        return acc?.userId ?: ""
+    }
+
+    fun setBackupGoogleAccountUid(uid: String) {
+        prefs.edit().putString("agritech_backup_google_uid", uid.trim()).apply()
     }
 }

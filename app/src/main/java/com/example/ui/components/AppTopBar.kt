@@ -1,5 +1,10 @@
 package com.example.ui.components
 
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -37,6 +42,17 @@ fun AppTopBar(
     onOpenLicense: () -> Unit,
     onLockApp: () -> Unit
 ) {
+    val context = LocalContext.current
+    val prefs = remember { com.example.data.local.AppPreferences(context) }
+    val businessLogoPath = remember { prefs.getBusinessSettings().logoPath }
+    val logoBitmap = remember(businessLogoPath) {
+        if (businessLogoPath.isNotBlank()) {
+            com.example.ui.utils.ImageUtils.loadLogoBitmap(businessLogoPath, 80)
+        } else {
+            null
+        }
+    }
+
     Surface(
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 3.dp,
@@ -58,19 +74,30 @@ fun AppTopBar(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(AmberPrimary),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Bolt,
-                            contentDescription = "Agritech Logo",
-                            tint = Color.Black,
-                            modifier = Modifier.size(22.dp)
+                    if (logoBitmap != null) {
+                        Image(
+                            bitmap = logoBitmap.asImageBitmap(),
+                            contentDescription = "Logo",
+                            modifier = Modifier
+                                .height(40.dp)
+                                .wrapContentWidth(),
+                            contentScale = ContentScale.Fit
                         )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(AmberPrimary),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Bolt,
+                                contentDescription = "Agritech Logo",
+                                tint = Color.Black,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.width(10.dp))
@@ -120,6 +147,11 @@ fun AppTopBar(
                             RoseError.copy(alpha = 0.15f),
                             RoseError,
                             "TAMPER"
+                        )
+                        else -> Triple(
+                            RoseError.copy(alpha = 0.15f),
+                            RoseError,
+                            "LOCKED"
                         )
                     }
 

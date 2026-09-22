@@ -69,6 +69,49 @@ data class QuoteEntity(
     val createdAt: Long = System.currentTimeMillis()
 )
 
+data class QuoteDraft(
+    val id: String = UUID.randomUUID().toString(),
+    val number: String = "QTN-001",
+    val date: String = "",
+    val validUntil: String = "",
+    val customerId: Int? = null,
+    val customerName: String = "",
+    val customerPhone: String = "",
+    val customerLocation: String = "",
+    val description: String = "",
+    val itemsJson: String = "[]",
+    val materialsTotal: Double = 0.0,
+    val isLabourAutoCalculated: Boolean = true,
+    val labour: Double = 0.0,
+    val grandTotal: Double = 0.0,
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+fun parseQuoteItemsFromJson(itemsJson: String): List<QuoteItem> {
+    val list = mutableListOf<QuoteItem>()
+    if (itemsJson.isBlank() || itemsJson == "[]") return list
+    try {
+        val arr = org.json.JSONArray(itemsJson)
+        for (i in 0 until arr.length()) {
+            val obj = arr.getJSONObject(i)
+            list.add(
+                QuoteItem(
+                    id = obj.optString("id", i.toString()),
+                    materialId = if (obj.has("materialId") && !obj.isNull("materialId")) obj.optInt("materialId") else null,
+                    name = obj.optString("name", "Item"),
+                    unit = obj.optString("unit", "Pcs"),
+                    price = obj.optDouble("price", 0.0),
+                    quantity = obj.optDouble("quantity", 1.0),
+                    total = obj.optDouble("total", 0.0)
+                )
+            )
+        }
+    } catch (e: Exception) {
+        // Fallback for safety
+    }
+    return list
+}
+
 data class BusinessSettings(
     val name: String = "",
     val slogan: String = "",
@@ -85,7 +128,8 @@ data class BusinessSettings(
     val logoPath: String = "",
     val signaturePath: String = "",
     val quotationTermsSw: String = "Haya makadirio (Quotation) ni halali kwa siku 14 pekee kuanzia tarehe iliyotolewa. Baada ya hapo, bei zinaweza kubadilika kulingana na hali ya soko.",
-    val quotationTermsEn: String = "This quotation is valid for 14 days only from the date of issue. Thereafter, prices are subject to change according to market conditions."
+    val quotationTermsEn: String = "This quotation is valid for 14 days only from the date of issue. Thereafter, prices are subject to change according to market conditions.",
+    val labourPercentage: Double = 40.0
 )
 
 enum class LicenseType(val code: String, val titleSw: String, val titleEn: String, val durationDays: Int?, val priceTsh: Int) {
@@ -113,7 +157,11 @@ enum class LicenseStatus {
     TRIAL,
     TRIAL_EXPIRED,
     ACTIVE,
+    DISABLED,
+    REVOKED,
+    EXPIRED,
     LICENSE_EXPIRED,
+    INVALID_DEVICE,
     TAMPERED
 }
 

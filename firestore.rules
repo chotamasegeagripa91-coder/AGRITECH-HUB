@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if the user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to check if user accesses their own document
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // User document under /users/{userId}
+    match /users/{userId} {
+      // Allow user to read their own account document
+      allow read: if isOwner(userId);
+      
+      // Allow user to create their initial document upon registration
+      allow create: if isOwner(userId) 
+        && !request.resource.data.keys().hasAny(['accountStatus', 'isDisabled', 'licenseStatus', 'paidLicenseExpiryDate', 'licenseDevice', 'paidLicenseKey']);
+
+      // Allow user to update their business profile, but STRICTLY PROHIBIT modifying license/account security status
+      allow update: if isOwner(userId)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+             'accountStatus', 
+             'isDisabled', 
+             'licenseStatus', 
+             'paidLicenseExpiryDate', 
+             'licenseDevice', 
+             'paidLicenseKey'
+           ]);
+
+      // Allow users to read and write subcollections (backups, materials, customers, quotes) under their own UID
+      match /{subcollection}/{document=**} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // Admin collection - accessible only by Admin credentials
+    match /admin/{document=**} {
+      allow read, write: if false; // Only manageable via Firebase Admin SDK / Console
+    }
+  }
+}

@@ -3,6 +3,9 @@ package com.example.ui.screens
 import android.content.Context
 import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -98,6 +101,14 @@ fun AuthScreen(
     val focusManager = LocalFocusManager.current
     val coroutineScope = rememberCoroutineScope()
     val prefs = remember { AppPreferences(context) }
+    val businessLogoPath = remember { prefs.getBusinessSettings().logoPath }
+    val logoBitmap = remember(businessLogoPath) {
+        if (businessLogoPath.isNotBlank()) {
+            com.example.ui.utils.ImageUtils.loadLogoBitmap(businessLogoPath, 160)
+        } else {
+            null
+        }
+    }
 
     val autofill = LocalAutofill.current
     val autofillTree = LocalAutofillTree.current
@@ -556,24 +567,35 @@ fun AuthScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             // Agritech Hub Logo & Emblem
-            Box(
-                modifier = Modifier
-                    .size(72.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(AmberLight, AmberPrimary, AmberDark)
-                        )
-                    )
-                    .border(2.dp, AmberPrimary, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Bolt,
-                    contentDescription = "Agritech Hub",
-                    tint = Color.Black,
-                    modifier = Modifier.size(40.dp)
+            if (logoBitmap != null) {
+                Image(
+                    bitmap = logoBitmap.asImageBitmap(),
+                    contentDescription = "Agritech Hub Logo",
+                    modifier = Modifier
+                        .height(84.dp)
+                        .wrapContentWidth(),
+                    contentScale = ContentScale.Fit
                 )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(AmberLight, AmberPrimary, AmberDark)
+                            )
+                        )
+                        .border(2.dp, AmberPrimary, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Bolt,
+                        contentDescription = "Agritech Hub",
+                        tint = Color.Black,
+                        modifier = Modifier.size(40.dp)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))

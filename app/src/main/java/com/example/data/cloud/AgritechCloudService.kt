@@ -573,19 +573,48 @@ class AgritechCloudService(context: Context) {
 
     /**
      * Synchronizes business data to user's server cloud backup.
-     * Scoped strictly under /users/{uid} in Firestore.
+     * Scoped strictly under /users/{uid} and /google_backups/{email} in Firestore.
      */
-    fun syncBackupToCloud(payload: CloudBackupPayload): ServerResponse<Long> {
+    fun syncBackupToCloud(payload: CloudBackupPayload, backupEmail: String = ""): ServerResponse<Long> {
         val uid = getAuthenticatedFirebaseUid(payload.userId)
-        if (uid.isBlank()) {
-            return ServerResponse(false, "Hujaunganishwa na akaunti ya wingu (Missing or unauthenticated User ID).")
+        val emailToUse = if (backupEmail.isNotBlank()) backupEmail.trim().lowercase() else payload.business.email.trim().lowercase()
+        val normalizedEmailKey = if (emailToUse.isNotBlank() && emailToUse.contains("@")) {
+            emailToUse.replace(".", "_").replace("@", "_at_")
+        } else ""
+
+        if (uid.isBlank() && normalizedEmailKey.isBlank()) {
+            return ServerResponse(false, "Hujaunganishwa na akaunti ya wingu au Google Account.")
         }
 
-        val timestamp = payload.timestamp
+        val timestamp = System.currentTimeMillis()
+
+        // Rule 8: NEVER allow an empty new local database to overwrite existing cloud backup data
+        val isLocalEmpty = payload.materials.isEmpty() && payload.customers.isEmpty() && payload.quotes.isEmpty()
+        if (isLocalEmpty && uid.isNotBlank()) {
+            try {
+                val db = FirebaseFirestore.getInstance()
+                val existingSnap = Tasks.await(db.collection("users").document(uid).collection("backups").document("latest").get(), 5, TimeUnit.SECONDS)
+                if (existingSnap != null && existingSnap.exists()) {
+                    val mList = existingSnap.get("materials") as? List<*>
+                    val cList = existingSnap.get("customers") as? List<*>
+                    val qList = existingSnap.get("quotes") as? List<*>
+                    if (!mList.isNullOrEmpty() || !cList.isNullOrEmpty() || !qList.isNullOrEmpty()) {
+                        return ServerResponse(
+                            false,
+                            "Hifadhi ya wingu haikufutwa: Data zako zipo salama kwenye wingu. Tafadhali tumia 'Restore Data' kurejesha taarifa zako."
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("AgritechCloudService", "Empty overwrite check warning: ${e.message}")
+            }
+        }
+
         val root = JSONObject().apply {
             put("version", payload.version)
             put("timestamp", timestamp)
             put("userId", uid)
+            put("backupEmail", emailToUse)
 
             // Business
             val b = payload.business
@@ -603,6 +632,10 @@ class AgritechCloudService(context: Context) {
                 put("lipaNumber", b.lipaNumber)
                 put("mobileMoney", b.mobileMoney)
                 put("logoPath", b.logoPath)
+                put("signaturePath", b.signaturePath)
+                put("termsSw", b.quotationTermsSw)
+                put("termsEn", b.quotationTermsEn)
+                put("labourPercentage", b.labourPercentage)
             }
             put("business", bObj)
 
@@ -664,16 +697,16 @@ class AgritechCloudService(context: Context) {
         }
 
         // Save locally for offline fallback
-        serverStore.edit()
-            .putString("cloud_backup_$uid", root.toString())
-            .putLong("cloud_backup_time_$uid", timestamp)
-            .apply()
+        if (uid.isNotBlank()) {
+            serverStore.edit()
+                .putString("cloud_backup_$uid", root.toString())
+                .putLong("cloud_backup_time_$uid", timestamp)
+                .apply()
+        }
 
-        // Real Firestore Sync scoped under /users/$uid
+        // Real Firestore Sync scoped under /users/$uid and /google_backups/$normalizedEmail
         try {
             val db = FirebaseFirestore.getInstance()
-            val userDocRef = db.collection("users").document(uid)
-
             val b = payload.business
             val businessMap = hashMapOf<String, Any>(
                 "name" to b.name,
@@ -691,20 +724,10 @@ class AgritechCloudService(context: Context) {
                 "logoPath" to b.logoPath,
                 "signaturePath" to b.signaturePath,
                 "termsSw" to b.quotationTermsSw,
-                "termsEn" to b.quotationTermsEn
+                "termsEn" to b.quotationTermsEn,
+                "labourPercentage" to b.labourPercentage
             )
 
-            val userRootMap = hashMapOf<String, Any>(
-                "userId" to uid,
-                "lastSyncTimestamp" to timestamp,
-                "business" to businessMap,
-                "materialsCount" to payload.materials.size,
-                "customersCount" to payload.customers.size,
-                "quotesCount" to payload.quotes.size
-            )
-            userDocRef.set(userRootMap, SetOptions.merge())
-
-            // Backup Snapshot document at /users/$uid/backups/latest
             val materialsListMap = payload.materials.map { m ->
                 hashMapOf<String, Any>(
                     "id" to m.id,
@@ -751,81 +774,99 @@ class AgritechCloudService(context: Context) {
                 "version" to payload.version,
                 "timestamp" to timestamp,
                 "userId" to uid,
+                "backupEmail" to emailToUse,
                 "business" to businessMap,
                 "materials" to materialsListMap,
                 "customers" to customersListMap,
                 "quotes" to quotesListMap
             )
 
-            val backupTask = userDocRef.collection("backups").document("latest").set(backupDocMap)
-            Tasks.await(backupTask, 10, TimeUnit.SECONDS)
+            if (uid.isNotBlank()) {
+                val userDocRef = db.collection("users").document(uid)
+                val userRootMap = hashMapOf<String, Any>(
+                    "userId" to uid,
+                    "backupEmail" to emailToUse,
+                    "lastSyncTimestamp" to timestamp,
+                    "business" to businessMap,
+                    "materialsCount" to payload.materials.size,
+                    "customersCount" to payload.customers.size,
+                    "quotesCount" to payload.quotes.size
+                )
+                userDocRef.set(userRootMap, SetOptions.merge())
+                val backupTask = userDocRef.collection("backups").document("latest").set(backupDocMap)
+                Tasks.await(backupTask, 10, TimeUnit.SECONDS)
 
-            // Subcollections under /users/$uid/
-            try {
-                val matSnapshot = Tasks.await(userDocRef.collection("materials").get(), 5, TimeUnit.SECONDS)
-                val localMatIds = payload.materials.map { it.id.toString() }.toSet()
-                val batch = db.batch()
-                var batchCount = 0
-                for (doc in matSnapshot.documents) {
-                    if (!localMatIds.contains(doc.id)) {
-                        batch.delete(doc.reference)
-                        batchCount++
+                // Subcollections under /users/$uid/
+                if (payload.materials.isNotEmpty()) {
+                    for (m in payload.materials) {
+                        val matMap = hashMapOf<String, Any>(
+                            "id" to m.id,
+                            "internalCode" to m.internalCode,
+                            "name" to m.name,
+                            "unit" to m.unit,
+                            "price" to m.price,
+                            "category" to m.category,
+                            "isDemo" to m.isDemo,
+                            "userId" to m.userId
+                        )
+                        userDocRef.collection("materials").document(m.id.toString()).set(matMap, SetOptions.merge())
                     }
                 }
-                if (batchCount > 0) {
-                    Tasks.await(batch.commit(), 5, TimeUnit.SECONDS)
-                }
-            } catch (e: Exception) {
-                android.util.Log.w("AgritechCloudService", "Error cleaning deleted cloud materials: ${e.message}")
-            }
 
-            if (payload.materials.isNotEmpty()) {
-                for (m in payload.materials) {
-                    val matMap = hashMapOf<String, Any>(
-                        "id" to m.id,
-                        "internalCode" to m.internalCode,
-                        "name" to m.name,
-                        "unit" to m.unit,
-                        "price" to m.price,
-                        "category" to m.category,
-                        "isDemo" to m.isDemo,
-                        "userId" to m.userId
+                for (c in payload.customers) {
+                    val custMap = hashMapOf<String, Any>(
+                        "id" to c.id,
+                        "name" to c.name,
+                        "phone" to c.phone,
+                        "location" to c.location,
+                        "notes" to c.notes
                     )
-                    userDocRef.collection("materials").document(m.id.toString()).set(matMap, SetOptions.merge())
+                    userDocRef.collection("customers").document(c.id.toString()).set(custMap, SetOptions.merge())
+                }
+
+                for (q in payload.quotes) {
+                    val qMap = hashMapOf<String, Any>(
+                        "id" to q.id,
+                        "number" to q.number,
+                        "date" to q.date,
+                        "validUntil" to q.validUntil,
+                        "customerId" to q.customerId,
+                        "customerName" to q.customerName,
+                        "customerPhone" to q.customerPhone,
+                        "customerLocation" to q.customerLocation,
+                        "description" to q.description,
+                        "itemsJson" to q.itemsJson,
+                        "materialsTotal" to q.materialsTotal,
+                        "labour" to q.labour,
+                        "grandTotal" to q.grandTotal,
+                        "status" to q.status,
+                        "paid" to q.paid,
+                        "createdAt" to q.createdAt
+                    )
+                    userDocRef.collection("quotes").document(q.id.toString()).set(qMap, SetOptions.merge())
                 }
             }
 
-            for (c in payload.customers) {
-                val custMap = hashMapOf<String, Any>(
-                    "id" to c.id,
-                    "name" to c.name,
-                    "phone" to c.phone,
-                    "location" to c.location,
-                    "notes" to c.notes
-                )
-                userDocRef.collection("customers").document(c.id.toString()).set(custMap, SetOptions.merge())
-            }
-
-            for (q in payload.quotes) {
-                val qMap = hashMapOf<String, Any>(
-                    "id" to q.id,
-                    "number" to q.number,
-                    "date" to q.date,
-                    "validUntil" to q.validUntil,
-                    "customerId" to q.customerId,
-                    "customerName" to q.customerName,
-                    "customerPhone" to q.customerPhone,
-                    "customerLocation" to q.customerLocation,
-                    "description" to q.description,
-                    "itemsJson" to q.itemsJson,
-                    "materialsTotal" to q.materialsTotal,
-                    "labour" to q.labour,
-                    "grandTotal" to q.grandTotal,
-                    "status" to q.status,
-                    "paid" to q.paid,
-                    "createdAt" to q.createdAt
-                )
-                userDocRef.collection("quotes").document(q.id.toString()).set(qMap, SetOptions.merge())
+            // Also mirror backup under /google_backups/$normalizedEmail
+            if (normalizedEmailKey.isNotBlank()) {
+                try {
+                    val gBackupDocRef = db.collection("google_backups").document(normalizedEmailKey)
+                    gBackupDocRef.set(
+                        hashMapOf<String, Any>(
+                            "backupEmail" to emailToUse,
+                            "userId" to uid,
+                            "lastSyncTimestamp" to timestamp,
+                            "business" to businessMap,
+                            "materialsCount" to payload.materials.size,
+                            "customersCount" to payload.customers.size,
+                            "quotesCount" to payload.quotes.size
+                        ),
+                        SetOptions.merge()
+                    )
+                    gBackupDocRef.collection("backups").document("latest").set(backupDocMap)
+                } catch (e: Exception) {
+                    android.util.Log.w("AgritechCloudService", "Google backup mirror warning: ${e.message}")
+                }
             }
         } catch (e: Exception) {
             android.util.Log.w("AgritechCloudService", "Firestore sync warning (using local store): ${e.message}")
@@ -840,250 +881,411 @@ class AgritechCloudService(context: Context) {
 
     /**
      * Restores backed-up business data from server cloud for a user.
-     * Reads strictly from /users/{uid} in Firestore.
+     * Reads from /users/{uid} and /google_backups/{email} in Firestore.
      */
-    fun restoreBackupFromCloud(userId: String): ServerResponse<CloudBackupPayload> {
+    fun restoreBackupFromCloud(userId: String, backupEmail: String = ""): ServerResponse<CloudBackupPayload> {
         val uid = getAuthenticatedFirebaseUid(userId)
-        if (uid.isBlank()) {
-            return ServerResponse(false, "User ID haipo.")
+        val emailToUse = if (backupEmail.isNotBlank()) backupEmail.trim().lowercase() else ""
+        val normalizedEmailKey = if (emailToUse.isNotBlank() && emailToUse.contains("@")) {
+            emailToUse.replace(".", "_").replace("@", "_at_")
+        } else ""
+
+        if (uid.isBlank() && normalizedEmailKey.isBlank()) {
+            return ServerResponse(false, "User ID au Akaunti ya Google ya hifadhi haipatikani.")
         }
 
-        // Attempt restoring directly from Firestore /users/$uid/backups/latest
+        var business = BusinessSettings()
+        val materialsMap = mutableMapOf<String, MaterialEntity>()
+        val customersMap = mutableMapOf<String, CustomerEntity>()
+        val quotesMap = mutableMapOf<String, QuoteEntity>()
+        var timestamp = System.currentTimeMillis()
+        var version = 1
+
+        var isFirestoreConnected = false
+
+        // 1. Attempt restoring directly from Firestore /users/$uid and /google_backups/$normalizedEmail
         try {
             val db = FirebaseFirestore.getInstance()
-            val backupDocRef = db.collection("users").document(uid).collection("backups").document("latest")
-            val task = backupDocRef.get()
-            val snapshot = Tasks.await(task, 10, TimeUnit.SECONDS)
 
-            if (snapshot != null && snapshot.exists()) {
-                val data = snapshot.data
-                if (data != null) {
-                    val timestamp = (data["timestamp"] as? Long) ?: System.currentTimeMillis()
-                    val version = ((data["version"] as? Long) ?: 1L).toInt()
+            // Check /users/$uid/backups/latest
+            if (uid.isNotBlank()) {
+                val userDocRef = db.collection("users").document(uid)
+                try {
+                    val backupDocRef = userDocRef.collection("backups").document("latest")
+                    val snapshot = Tasks.await(backupDocRef.get(), 8, TimeUnit.SECONDS)
+                    if (snapshot != null && snapshot.exists()) {
+                        isFirestoreConnected = true
+                        val data = snapshot.data
+                        if (data != null) {
+                            timestamp = (data["timestamp"] as? Long) ?: System.currentTimeMillis()
+                            version = ((data["version"] as? Long) ?: 1L).toInt()
 
-                    val bObj = data["business"] as? Map<*, *>
-                    val business = if (bObj != null) {
-                        BusinessSettings(
-                            name = bObj["name"]?.toString() ?: "",
-                            slogan = bObj["slogan"]?.toString() ?: "",
-                            phone1 = bObj["phone1"]?.toString() ?: "",
-                            phone2 = bObj["phone2"]?.toString() ?: "",
-                            email = bObj["email"]?.toString() ?: "",
-                            address = bObj["address"]?.toString() ?: "",
-                            currency = bObj["currency"]?.toString() ?: "TSh",
-                            bankName = bObj["bankName"]?.toString() ?: "",
-                            bankAccountNumber = bObj["bankAccountNumber"]?.toString() ?: "",
-                            bankAccountName = bObj["bankAccountName"]?.toString() ?: "",
-                            lipaNumber = bObj["lipaNumber"]?.toString() ?: "",
-                            mobileMoney = bObj["mobileMoney"]?.toString() ?: "",
-                            logoPath = bObj["logoPath"]?.toString() ?: "",
-                            signaturePath = bObj["signaturePath"]?.toString() ?: "",
-                            quotationTermsSw = bObj["termsSw"]?.toString() ?: "",
-                            quotationTermsEn = bObj["termsEn"]?.toString() ?: ""
-                        )
-                    } else {
-                        BusinessSettings()
-                    }
+                            (data["business"] as? Map<*, *>)?.let { bObj ->
+                                business = parseBusinessFromMap(bObj)
+                            }
 
-                    val materials = mutableListOf<MaterialEntity>()
-                    val mList = data["materials"] as? List<*>
-                    if (mList != null) {
-                        for (item in mList) {
-                            val m = item as? Map<*, *> ?: continue
-                            materials.add(
-                                MaterialEntity(
-                                    id = (m["id"] as? Number)?.toInt() ?: 0,
-                                    internalCode = m["internalCode"]?.toString() ?: "",
-                                    name = m["name"]?.toString() ?: "Item",
-                                    unit = m["unit"]?.toString() ?: "Pcs",
-                                    price = (m["price"] as? Number)?.toDouble() ?: 0.0,
-                                    category = m["category"]?.toString() ?: "Jumla",
-                                    isDemo = (m["isDemo"] as? Boolean) ?: false,
-                                    userId = m["userId"]?.toString() ?: uid
-                                )
-                            )
+                            (data["materials"] as? List<*>)?.forEach { item ->
+                                (item as? Map<*, *>)?.let { m ->
+                                    parseMaterialFromMap(m, uid)?.let { mat ->
+                                        val key = if (mat.internalCode.isNotBlank()) mat.internalCode else "${mat.name}_${mat.category}_${mat.unit}"
+                                        materialsMap[key] = mat
+                                    }
+                                }
+                            }
+
+                            (data["customers"] as? List<*>)?.forEach { item ->
+                                (item as? Map<*, *>)?.let { c ->
+                                    parseCustomerFromMap(c)?.let { cust ->
+                                        val key = if (cust.id > 0) cust.id.toString() else "${cust.name}_${cust.phone}"
+                                        customersMap[key] = cust
+                                    }
+                                }
+                            }
+
+                            (data["quotes"] as? List<*>)?.forEach { item ->
+                                (item as? Map<*, *>)?.let { q ->
+                                    parseQuoteFromMap(q)?.let { qte ->
+                                        val key = if (qte.id > 0) qte.id.toString() else qte.number
+                                        quotesMap[key] = qte
+                                    }
+                                }
+                            }
                         }
                     }
+                } catch (e: Exception) {
+                    android.util.Log.w("AgritechCloudService", "Firestore backups/latest fetch warning: ${e.message}")
+                }
 
-                    val customers = mutableListOf<CustomerEntity>()
-                    val cList = data["customers"] as? List<*>
-                    if (cList != null) {
-                        for (item in cList) {
-                            val c = item as? Map<*, *> ?: continue
-                            customers.add(
-                                CustomerEntity(
-                                    id = (c["id"] as? Number)?.toInt() ?: 0,
-                                    name = c["name"]?.toString() ?: "Customer",
-                                    phone = c["phone"]?.toString() ?: "",
-                                    location = c["location"]?.toString() ?: "",
-                                    notes = c["notes"]?.toString() ?: ""
-                                )
-                            )
+                // Subcollections under /users/$uid/
+                try {
+                    val matSnap = Tasks.await(userDocRef.collection("materials").get(), 6, TimeUnit.SECONDS)
+                    if (matSnap != null) {
+                        isFirestoreConnected = true
+                        for (doc in matSnap.documents) {
+                            doc.data?.let { m ->
+                                parseMaterialFromMap(m, uid)?.let { mat ->
+                                    val key = if (mat.internalCode.isNotBlank()) mat.internalCode else "${mat.name}_${mat.category}_${mat.unit}"
+                                    if (!materialsMap.containsKey(key)) {
+                                        materialsMap[key] = mat
+                                    }
+                                }
+                            }
                         }
                     }
+                } catch (e: Exception) {
+                    android.util.Log.w("AgritechCloudService", "Firestore materials subcollection fetch warning: ${e.message}")
+                }
 
-                    val quotes = mutableListOf<QuoteEntity>()
-                    val qList = data["quotes"] as? List<*>
-                    if (qList != null) {
-                        for (item in qList) {
-                            val q = item as? Map<*, *> ?: continue
-                            quotes.add(
-                                QuoteEntity(
-                                    id = (q["id"] as? Number)?.toInt() ?: 0,
-                                    number = q["number"]?.toString() ?: "QTN-001",
-                                    date = q["date"]?.toString() ?: "2026-01-01",
-                                    validUntil = q["validUntil"]?.toString() ?: "",
-                                    customerId = (q["customerId"] as? Number)?.toInt() ?: 0,
-                                    customerName = q["customerName"]?.toString() ?: "Customer",
-                                    customerPhone = q["customerPhone"]?.toString() ?: "",
-                                    customerLocation = q["customerLocation"]?.toString() ?: "",
-                                    description = q["description"]?.toString() ?: "",
-                                    itemsJson = q["itemsJson"]?.toString() ?: "[]",
-                                    materialsTotal = (q["materialsTotal"] as? Number)?.toDouble() ?: 0.0,
-                                    labour = (q["labour"] as? Number)?.toDouble() ?: 0.0,
-                                    grandTotal = (q["grandTotal"] as? Number)?.toDouble() ?: 0.0,
-                                    status = q["status"]?.toString() ?: "quotation",
-                                    paid = (q["paid"] as? Boolean) ?: false,
-                                    createdAt = (q["createdAt"] as? Number)?.toLong() ?: System.currentTimeMillis()
-                                )
-                            )
+                try {
+                    val custSnap = Tasks.await(userDocRef.collection("customers").get(), 6, TimeUnit.SECONDS)
+                    if (custSnap != null) {
+                        isFirestoreConnected = true
+                        for (doc in custSnap.documents) {
+                            doc.data?.let { c ->
+                                parseCustomerFromMap(c)?.let { cust ->
+                                    val key = if (cust.id > 0) cust.id.toString() else "${cust.name}_${cust.phone}"
+                                    if (!customersMap.containsKey(key)) {
+                                        customersMap[key] = cust
+                                    }
+                                }
+                            }
                         }
                     }
+                } catch (e: Exception) {
+                    android.util.Log.w("AgritechCloudService", "Firestore customers subcollection fetch warning: ${e.message}")
+                }
 
-                    val payload = CloudBackupPayload(
-                        version = version,
-                        timestamp = timestamp,
-                        userId = uid,
-                        business = business,
-                        materials = materials,
-                        customers = customers,
-                        quotes = quotes
-                    )
-
-                    return ServerResponse(
-                        success = true,
-                        message = "Taarifa zote zimerudishwa kutoka kwenye wingu (Firestore Backup Restored)!",
-                        data = payload
-                    )
+                try {
+                    val qSnap = Tasks.await(userDocRef.collection("quotes").get(), 6, TimeUnit.SECONDS)
+                    if (qSnap != null) {
+                        isFirestoreConnected = true
+                        for (doc in qSnap.documents) {
+                            doc.data?.let { q ->
+                                parseQuoteFromMap(q)?.let { qte ->
+                                    val key = if (qte.id > 0) qte.id.toString() else qte.number
+                                    if (!quotesMap.containsKey(key)) {
+                                        quotesMap[key] = qte
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("AgritechCloudService", "Firestore quotes subcollection fetch warning: ${e.message}")
                 }
             }
+
+            // Check /google_backups/$normalizedEmailKey if exists
+            if (normalizedEmailKey.isNotBlank()) {
+                try {
+                    val gBackupDocRef = db.collection("google_backups").document(normalizedEmailKey).collection("backups").document("latest")
+                    val gSnapshot = Tasks.await(gBackupDocRef.get(), 8, TimeUnit.SECONDS)
+                    if (gSnapshot != null && gSnapshot.exists()) {
+                        isFirestoreConnected = true
+                        val data = gSnapshot.data
+                        if (data != null) {
+                            timestamp = (data["timestamp"] as? Long) ?: timestamp
+                            version = ((data["version"] as? Long) ?: 1L).toInt()
+
+                            (data["business"] as? Map<*, *>)?.let { bObj ->
+                                val b = parseBusinessFromMap(bObj)
+                                if (business.name.isBlank() && b.name.isNotBlank()) business = b
+                            }
+
+                            (data["materials"] as? List<*>)?.forEach { item ->
+                                (item as? Map<*, *>)?.let { m ->
+                                    parseMaterialFromMap(m, uid.ifBlank { "google_user" })?.let { mat ->
+                                        val key = if (mat.internalCode.isNotBlank()) mat.internalCode else "${mat.name}_${mat.category}_${mat.unit}"
+                                        if (!materialsMap.containsKey(key)) materialsMap[key] = mat
+                                    }
+                                }
+                            }
+
+                            (data["customers"] as? List<*>)?.forEach { item ->
+                                (item as? Map<*, *>)?.let { c ->
+                                    parseCustomerFromMap(c)?.let { cust ->
+                                        val key = if (cust.id > 0) cust.id.toString() else "${cust.name}_${cust.phone}"
+                                        if (!customersMap.containsKey(key)) customersMap[key] = cust
+                                    }
+                                }
+                            }
+
+                            (data["quotes"] as? List<*>)?.forEach { item ->
+                                (item as? Map<*, *>)?.let { q ->
+                                    parseQuoteFromMap(q)?.let { qte ->
+                                        val key = if (qte.id > 0) qte.id.toString() else qte.number
+                                        if (!quotesMap.containsKey(key)) quotesMap[key] = qte
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("AgritechCloudService", "Google backup fetch warning: ${e.message}")
+                }
+            }
+
+            if (isFirestoreConnected) {
+                val payload = CloudBackupPayload(
+                    version = version,
+                    timestamp = timestamp,
+                    userId = uid.ifBlank { emailToUse },
+                    business = business,
+                    materials = materialsMap.values.toList(),
+                    customers = customersMap.values.toList(),
+                    quotes = quotesMap.values.toList()
+                )
+
+                if (uid.isNotBlank()) {
+                    try {
+                        val rootObj = JSONObject().apply {
+                            put("timestamp", timestamp)
+                            put("userId", uid)
+                        }
+                        serverStore.edit().putString("cloud_backup_$uid", rootObj.toString()).apply()
+                    } catch (e: Exception) {
+                        // Non-fatal
+                    }
+                }
+
+                return ServerResponse(
+                    success = true,
+                    message = "Taarifa zote zimerudishwa kutoka kwenye wingu (Firestore Cloud Backup Restored)!",
+                    data = payload
+                )
+            }
         } catch (e: Exception) {
-            android.util.Log.w("AgritechCloudService", "Firestore restore warning: ${e.message}")
+            android.util.Log.e("AgritechCloudService", "Firestore restore error: ${e.message}", e)
         }
 
         // Fallback to local serverStore cache if Firestore is unreachable / offline
-        val jsonStr = serverStore.getString("cloud_backup_$uid", null)
-            ?: return ServerResponse(false, "Hakuna taarifa za nakala (backup) zilizopatikana kwenye wingu kwa akaunti hii.")
+        val jsonStr = if (uid.isNotBlank()) serverStore.getString("cloud_backup_$uid", null) else null
+        if (!jsonStr.isNullOrBlank()) {
+            return try {
+                val root = JSONObject(jsonStr)
+                val cachedTimestamp = root.optLong("timestamp", System.currentTimeMillis())
 
-        return try {
-            val root = JSONObject(jsonStr)
-            val timestamp = root.optLong("timestamp", System.currentTimeMillis())
+                val bObj = root.optJSONObject("business")
+                val cachedBusiness = if (bObj != null) {
+                    BusinessSettings(
+                        name = bObj.optString("name", ""),
+                        slogan = bObj.optString("slogan", ""),
+                        phone1 = bObj.optString("phone1", ""),
+                        phone2 = bObj.optString("phone2", ""),
+                        email = bObj.optString("email", ""),
+                        address = bObj.optString("address", ""),
+                        currency = bObj.optString("currency", "TSh"),
+                        bankName = bObj.optString("bankName", ""),
+                        bankAccountNumber = bObj.optString("bankAccountNumber", ""),
+                        bankAccountName = bObj.optString("bankAccountName", ""),
+                        lipaNumber = bObj.optString("lipaNumber", ""),
+                        mobileMoney = bObj.optString("mobileMoney", ""),
+                        logoPath = bObj.optString("logoPath", ""),
+                        signaturePath = bObj.optString("signaturePath", ""),
+                        quotationTermsSw = bObj.optString("termsSw", ""),
+                        quotationTermsEn = bObj.optString("termsEn", ""),
+                        labourPercentage = bObj.optDouble("labourPercentage", 40.0)
+                    )
+                } else {
+                    BusinessSettings()
+                }
 
-            val bObj = root.optJSONObject("business")
-            val business = if (bObj != null) {
-                BusinessSettings(
-                    name = bObj.optString("name", ""),
-                    slogan = bObj.optString("slogan", ""),
-                    phone1 = bObj.optString("phone1", ""),
-                    phone2 = bObj.optString("phone2", ""),
-                    email = bObj.optString("email", ""),
-                    address = bObj.optString("address", ""),
-                    currency = bObj.optString("currency", "TSh"),
-                    bankName = bObj.optString("bankName", ""),
-                    bankAccountNumber = bObj.optString("bankAccountNumber", ""),
-                    bankAccountName = bObj.optString("bankAccountName", ""),
-                    lipaNumber = bObj.optString("lipaNumber", ""),
-                    mobileMoney = bObj.optString("mobileMoney", ""),
-                    logoPath = bObj.optString("logoPath", "")
+                val payload = CloudBackupPayload(
+                    version = 1,
+                    timestamp = cachedTimestamp,
+                    userId = uid,
+                    business = cachedBusiness,
+                    materials = materialsMap.values.toList(),
+                    customers = customersMap.values.toList(),
+                    quotes = quotesMap.values.toList()
                 )
-            } else {
-                BusinessSettings()
+
+                ServerResponse(
+                    success = true,
+                    message = "Nakala ya wingu imerejeshwa kutoka kwenye kumbukumbu (Offline Cache Restored).",
+                    data = payload
+                )
+            } catch (e: Exception) {
+                ServerResponse(false, "Hitilafu wakati wa kurejesha nakala ya wingu: ${e.message}")
             }
-
-            val materials = mutableListOf<MaterialEntity>()
-            val mArr = root.optJSONArray("materials")
-            if (mArr != null) {
-                for (i in 0 until mArr.length()) {
-                    val o = mArr.getJSONObject(i)
-                    materials.add(
-                        MaterialEntity(
-                            id = o.optInt("id", 0),
-                            internalCode = o.optString("internalCode", ""),
-                            name = o.optString("name", "Item"),
-                            unit = o.optString("unit", "Pcs"),
-                            price = o.optDouble("price", 0.0),
-                            category = o.optString("category", "Jumla"),
-                            isDemo = o.optBoolean("isDemo", false),
-                            userId = o.optString("userId", uid)
-                        )
-                    )
-                }
-            }
-
-            val customers = mutableListOf<CustomerEntity>()
-            val cArr = root.optJSONArray("customers")
-            if (cArr != null) {
-                for (i in 0 until cArr.length()) {
-                    val o = cArr.getJSONObject(i)
-                    customers.add(
-                        CustomerEntity(
-                            id = o.optInt("id", 0),
-                            name = o.optString("name", "Customer"),
-                            phone = o.optString("phone", ""),
-                            location = o.optString("location", ""),
-                            notes = o.optString("notes", "")
-                        )
-                    )
-                }
-            }
-
-            val quotes = mutableListOf<QuoteEntity>()
-            val qArr = root.optJSONArray("quotes")
-            if (qArr != null) {
-                for (i in 0 until qArr.length()) {
-                    val o = qArr.getJSONObject(i)
-                    quotes.add(
-                        QuoteEntity(
-                            id = o.optInt("id", 0),
-                            number = o.optString("number", "QTN-001"),
-                            date = o.optString("date", "2026-01-01"),
-                            validUntil = o.optString("validUntil", ""),
-                            customerId = o.optInt("customerId", 0),
-                            customerName = o.optString("customerName", "Customer"),
-                            customerPhone = o.optString("customerPhone", ""),
-                            customerLocation = o.optString("customerLocation", ""),
-                            description = o.optString("description", ""),
-                            itemsJson = o.optString("itemsJson", "[]"),
-                            materialsTotal = o.optDouble("materialsTotal", 0.0),
-                            labour = o.optDouble("labour", 0.0),
-                            grandTotal = o.optDouble("grandTotal", 0.0),
-                            status = o.optString("status", "quotation"),
-                            paid = o.optBoolean("paid", false),
-                            createdAt = o.optLong("createdAt", System.currentTimeMillis())
-                        )
-                    )
-                }
-            }
-
-            val payload = CloudBackupPayload(
-                version = 1,
-                timestamp = timestamp,
-                userId = uid,
-                business = business,
-                materials = materials,
-                customers = customers,
-                quotes = quotes
-            )
-
-            ServerResponse(
-                success = true,
-                message = "Nakala ya wingu imerejeshwa kikamilifu! (Data Restored Successfully)",
-                data = payload
-            )
-        } catch (e: Exception) {
-            e.printStackTrace()
-            ServerResponse(false, "Hitilafu wakati wa kurejesha nakala ya wingu: ${e.message}")
         }
+
+        return ServerResponse(
+            false,
+            "Haikuweza kuunganishwa na wingu (Firebase Firestore). Tafadhali hakikisha kifaa chako kimeunganishwa na intaneti kisha ujaribu tena."
+        )
+    }
+
+    private fun parseBusinessFromMap(bObj: Map<*, *>): BusinessSettings {
+        return BusinessSettings(
+            name = bObj["name"]?.toString() ?: "",
+            slogan = bObj["slogan"]?.toString() ?: "",
+            phone1 = bObj["phone1"]?.toString() ?: "",
+            phone2 = bObj["phone2"]?.toString() ?: "",
+            email = bObj["email"]?.toString() ?: "",
+            address = bObj["address"]?.toString() ?: "",
+            currency = bObj["currency"]?.toString() ?: "TSh",
+            bankName = bObj["bankName"]?.toString() ?: "",
+            bankAccountNumber = bObj["bankAccountNumber"]?.toString() ?: "",
+            bankAccountName = bObj["bankAccountName"]?.toString() ?: "",
+            lipaNumber = bObj["lipaNumber"]?.toString() ?: "",
+            mobileMoney = bObj["mobileMoney"]?.toString() ?: "",
+            logoPath = bObj["logoPath"]?.toString() ?: "",
+            signaturePath = bObj["signaturePath"]?.toString() ?: "",
+            quotationTermsSw = (bObj["termsSw"] ?: bObj["quotationTermsSw"])?.toString() ?: "",
+            quotationTermsEn = (bObj["termsEn"] ?: bObj["quotationTermsEn"])?.toString() ?: "",
+            labourPercentage = when (val lp = bObj["labourPercentage"]) {
+                is Number -> lp.toDouble()
+                is String -> lp.toDoubleOrNull() ?: 40.0
+                else -> 40.0
+            }
+        )
+    }
+
+    private fun parseMaterialFromMap(m: Map<*, *>, userId: String): MaterialEntity? {
+        val name = m["name"]?.toString() ?: return null
+        if (name.isBlank()) return null
+        val priceDouble = when (val p = m["price"]) {
+            is Number -> p.toDouble()
+            is String -> p.toDoubleOrNull() ?: 0.0
+            else -> 0.0
+        }
+        val idInt = when (val idVal = m["id"]) {
+            is Number -> idVal.toInt()
+            is String -> idVal.toIntOrNull() ?: 0
+            else -> 0
+        }
+        val isDemoBool = when (val d = m["isDemo"]) {
+            is Boolean -> d
+            is String -> d.toBoolean()
+            else -> false
+        }
+        return MaterialEntity(
+            id = idInt,
+            internalCode = m["internalCode"]?.toString() ?: "",
+            name = name,
+            unit = m["unit"]?.toString() ?: "Pcs",
+            price = priceDouble,
+            category = m["category"]?.toString() ?: "JUMLA (GENERAL)",
+            isDemo = isDemoBool,
+            userId = m["userId"]?.toString() ?: userId
+        )
+    }
+
+    private fun parseCustomerFromMap(c: Map<*, *>): CustomerEntity? {
+        val name = c["name"]?.toString() ?: return null
+        if (name.isBlank()) return null
+        val idInt = when (val idVal = c["id"]) {
+            is Number -> idVal.toInt()
+            is String -> idVal.toIntOrNull() ?: 0
+            else -> 0
+        }
+        return CustomerEntity(
+            id = idInt,
+            name = name,
+            phone = c["phone"]?.toString() ?: "",
+            location = c["location"]?.toString() ?: "",
+            notes = c["notes"]?.toString() ?: ""
+        )
+    }
+
+    private fun parseQuoteFromMap(q: Map<*, *>): QuoteEntity? {
+        val number = q["number"]?.toString() ?: return null
+        if (number.isBlank()) return null
+        val idInt = when (val idVal = q["id"]) {
+            is Number -> idVal.toInt()
+            is String -> idVal.toIntOrNull() ?: 0
+            else -> 0
+        }
+        val custId = when (val cId = q["customerId"]) {
+            is Number -> cId.toInt()
+            is String -> cId.toIntOrNull() ?: 0
+            else -> 0
+        }
+        val matTotal = when (val mt = q["materialsTotal"]) {
+            is Number -> mt.toDouble()
+            is String -> mt.toDoubleOrNull() ?: 0.0
+            else -> 0.0
+        }
+        val labourVal = when (val l = q["labour"]) {
+            is Number -> l.toDouble()
+            is String -> l.toDoubleOrNull() ?: 0.0
+            else -> 0.0
+        }
+        val gTotal = when (val gt = q["grandTotal"]) {
+            is Number -> gt.toDouble()
+            is String -> gt.toDoubleOrNull() ?: 0.0
+            else -> 0.0
+        }
+        val isPaid = when (val p = q["paid"]) {
+            is Boolean -> p
+            is String -> p.toBoolean()
+            else -> false
+        }
+        val created = when (val ca = q["createdAt"]) {
+            is Number -> ca.toLong()
+            is String -> ca.toLongOrNull() ?: System.currentTimeMillis()
+            else -> System.currentTimeMillis()
+        }
+
+        return QuoteEntity(
+            id = idInt,
+            number = number,
+            date = q["date"]?.toString() ?: "2026-01-01",
+            validUntil = q["validUntil"]?.toString() ?: "",
+            customerId = custId,
+            customerName = q["customerName"]?.toString() ?: "Mteja",
+            customerPhone = q["customerPhone"]?.toString() ?: "",
+            customerLocation = q["customerLocation"]?.toString() ?: "",
+            description = q["description"]?.toString() ?: "",
+            itemsJson = q["itemsJson"]?.toString() ?: "[]",
+            materialsTotal = matTotal,
+            labour = labourVal,
+            grandTotal = gTotal,
+            status = q["status"]?.toString() ?: "quotation",
+            paid = isPaid,
+            createdAt = created
+        )
     }
 
     fun deleteMaterialFromCloud(materialId: Int, userId: String) {
